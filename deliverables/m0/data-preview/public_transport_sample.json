@@ -1,0 +1,8 @@
+{
+  "source": "Yandex Schedule API",
+  "documentation": "https://yandex.ru/dev/rasp/doc/",
+  "request_date": "2026-10-09",
+  "status": "not_fetched_no_api_key",
+  "records": [],
+  "note": "No YANDEX_RASP_API_KEY was available during this extraction; no schedule data is included."
+}

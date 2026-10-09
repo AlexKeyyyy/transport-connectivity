@@ -1,24 +1,24 @@
-# data/
+# Data layout
 
-## Что здесь лежит
+- `raw/` — local source downloads and temporary data; it is ignored by Git.
+- `processed/` — local intermediate data; it is ignored by Git.
+- `samples/` — small, documented samples safe to keep in Git. See
+  [`data/samples/README.md`](samples/README.md) for the current inventory and fields.
 
-- `raw/` — сырые выгрузки (OSM PBF, ответы API, оригинальные CSV). В git не попадают.
-- `processed/` — очищенные/нормализованные данные, готовые к загрузке в БД. В git не попадают.
-- `samples/` — небольшие демонстрационные файлы для преподавателя (разумный размер).
+## Sources and reproduction
 
-## Откуда брать данные
+The M0-1 pilot sample uses the «Если быть точным» intercity connectivity dataset,
+OSM via Overpass API, and the public OSRM Table endpoint. To refresh the files:
 
-- OSM PBF: официальные выгрузки Geofabrik / OSM (Россия / федеральные округа).
-- Overpass API: только точечные запросы, не качать им крупные регионы.
-- OSRM: расчёты выполняются локальным routing engine на основе OSM (появится позже).
-- API Яндекс Расписаний: ключ хранить только в `.env`, в git не коммитить.
+```bash
+py scripts/data/download_samples.py
+py scripts/data/profile_samples.py
+```
 
-## Что можно коммитить
+Optional environment variables: `OVERPASS_URL`, `OSRM_URL`, and
+`YANDEX_RASP_API_KEY`. Secrets belong in the environment only. The current
+Yandex sample JSON explicitly records that no API-key-backed records were
+obtained. Full-region PBF data is intentionally not downloaded for this pilot.
 
-- Файлы в `samples/` размером до ~1 МБ (CSV/JSON), понятные преподавателю.
-- Этот `README.md` и `.gitkeep`-маркеры пустых папок.
-
-## Что игнорируется Git
-
-См. `.gitignore`: `*.osm.pbf`, `*.osm.bz2`, `*.osrm*`, дампы БД,
-всё содержимое `raw/` и `processed/` (кроме `.gitkeep`).
+Large PBF extracts, raw downloads, OSRM data, and intermediates must not be
+committed. The ignore rules in `.gitignore` cover these locations and file types.

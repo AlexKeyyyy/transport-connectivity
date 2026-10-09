@@ -1,0 +1,11 @@
+city_id,osm_id,name,region,place_type,latitude,longitude,population,source
+osm-node-1686293227,node/1686293227,Москва,Москва,city,55.7505412,37.6174782,13010112,OpenStreetMap; region/population from connectivity dataset
+osm-node-27000366,node/27000366,Тверь,Тверская область,city,56.858675,35.9208284,416219,OpenStreetMap; region/population from connectivity dataset
+osm-node-27505266,node/27505266,Ярославль,Ярославская область,city,57.6263877,39.8933705,577279,OpenStreetMap; region/population from connectivity dataset
+osm-node-191698855,node/191698855,Владимир,Владимирская область,city,56.1288899,40.4075203,349951,OpenStreetMap; region/population from connectivity dataset
+osm-node-27505582,node/27505582,Рязань,Рязанская область,city,54.6295687,39.7425039,528599,OpenStreetMap; region/population from connectivity dataset
+osm-node-34389350,node/34389350,Тула,Тульская область,city,54.1930321,37.61754,473622,OpenStreetMap; region/population from connectivity dataset
+osm-node-246459003,node/246459003,Калуга,Калужская область,city,54.5101087,36.2598115,337058,OpenStreetMap; region/population from connectivity dataset
+osm-node-27072633,node/27072633,Смоленск,Смоленская область,city,54.7814057,32.0461261,316570,OpenStreetMap; region/population from connectivity dataset
+osm-node-27073428,node/27073428,Брянск,Брянская область,city,53.2423778,34.3668288,379152,OpenStreetMap; region/population from connectivity dataset
+osm-node-27096008,node/27096008,Орёл,Орловская область,city,52.9709262,36.0642127,303169,OpenStreetMap; region/population from connectivity dataset

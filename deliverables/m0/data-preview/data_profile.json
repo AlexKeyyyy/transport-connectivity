@@ -1,0 +1,305 @@
+{
+  "cities.csv": {
+    "rows": 10,
+    "columns_count": 9,
+    "columns": [
+      "city_id",
+      "osm_id",
+      "name",
+      "region",
+      "place_type",
+      "latitude",
+      "longitude",
+      "population",
+      "source"
+    ],
+    "inferred_types": {
+      "city_id": "string",
+      "osm_id": "string",
+      "name": "string",
+      "region": "string",
+      "place_type": "string",
+      "latitude": "number",
+      "longitude": "number",
+      "population": "integer",
+      "source": "string"
+    },
+    "missing_values": {
+      "city_id": 0,
+      "osm_id": 0,
+      "name": 0,
+      "region": 0,
+      "place_type": 0,
+      "latitude": 0,
+      "longitude": 0,
+      "population": 0,
+      "source": 0
+    },
+    "duplicate_rows": 0,
+    "file_size_bytes": 1802,
+    "numeric_ranges": {
+      "latitude": {
+        "min": 52.9709262,
+        "max": 57.6263877
+      },
+      "longitude": {
+        "min": 32.0461261,
+        "max": 40.4075203
+      },
+      "population": {
+        "min": 303169.0,
+        "max": 13010112.0
+      }
+    },
+    "delimiter": ",",
+    "encoding": "UTF-8",
+    "coordinate_validation": {
+      "invalid_rows": [],
+      "valid": true
+    },
+    "unique_city_ids": 10
+  },
+  "intercity_connectivity_sample.csv": {
+    "rows": 270,
+    "columns_count": 22,
+    "columns": [
+      "city_from",
+      "region_from",
+      "oktmo_from",
+      "sber_territory_id_from",
+      "is_capital_from",
+      "population_from",
+      "lat_from",
+      "lon_from",
+      "city_to",
+      "region_to",
+      "oktmo_to",
+      "sber_territory_id_to",
+      "is_capital_to",
+      "population_to",
+      "lat_to",
+      "lon_to",
+      "transport_type",
+      "distance_km",
+      "distance_hr",
+      "missing_reason",
+      "source",
+      "comment"
+    ],
+    "inferred_types": {
+      "city_from": "string",
+      "region_from": "string",
+      "oktmo_from": "integer",
+      "sber_territory_id_from": "integer",
+      "is_capital_from": "integer",
+      "population_from": "integer",
+      "lat_from": "number",
+      "lon_from": "number",
+      "city_to": "string",
+      "region_to": "string",
+      "oktmo_to": "integer",
+      "sber_territory_id_to": "integer",
+      "is_capital_to": "integer",
+      "population_to": "integer",
+      "lat_to": "number",
+      "lon_to": "number",
+      "transport_type": "string",
+      "distance_km": "number",
+      "distance_hr": "number",
+      "missing_reason": "string",
+      "source": "string",
+      "comment": "string"
+    },
+    "missing_values": {
+      "city_from": 0,
+      "region_from": 0,
+      "oktmo_from": 0,
+      "sber_territory_id_from": 0,
+      "is_capital_from": 0,
+      "population_from": 0,
+      "lat_from": 0,
+      "lon_from": 0,
+      "city_to": 0,
+      "region_to": 0,
+      "oktmo_to": 0,
+      "sber_territory_id_to": 0,
+      "is_capital_to": 0,
+      "population_to": 0,
+      "lat_to": 0,
+      "lon_to": 0,
+      "transport_type": 0,
+      "distance_km": 90,
+      "distance_hr": 90,
+      "missing_reason": 0,
+      "source": 0,
+      "comment": 0
+    },
+    "duplicate_rows": 0,
+    "file_size_bytes": 60144,
+    "numeric_ranges": {
+      "oktmo_from": {
+        "min": 15701000001.0,
+        "max": 78701000001.0
+      },
+      "sber_territory_id_from": {
+        "min": 953.0,
+        "max": 2539.0
+      },
+      "is_capital_from": {
+        "min": 1.0,
+        "max": 1.0
+      },
+      "population_from": {
+        "min": 303169.0,
+        "max": 13010112.0
+      },
+      "lat_from": {
+        "min": 52.9671928,
+        "max": 57.6216293
+      },
+      "lon_from": {
+        "min": 32.045251,
+        "max": 40.4082983
+      },
+      "oktmo_to": {
+        "min": 15701000001.0,
+        "max": 78701000001.0
+      },
+      "sber_territory_id_to": {
+        "min": 953.0,
+        "max": 2539.0
+      },
+      "is_capital_to": {
+        "min": 1.0,
+        "max": 1.0
+      },
+      "population_to": {
+        "min": 303169.0,
+        "max": 13010112.0
+      },
+      "lat_to": {
+        "min": 52.9671928,
+        "max": 57.6216293
+      },
+      "lon_to": {
+        "min": 32.045251,
+        "max": 40.4082983
+      },
+      "distance_km": {
+        "min": 109.0,
+        "max": 781.0
+      },
+      "distance_hr": {
+        "min": 2.0,
+        "max": 13.0
+      }
+    },
+    "delimiter": ";",
+    "encoding": "UTF-8",
+    "unique_transport_types": {
+      "road": 90,
+      "rail": 90,
+      "air": 90
+    },
+    "missing_route_rows": 90,
+    "missing_route_reasons": {
+      "Маршрут не найден": 90
+    },
+    "coordinate_validation": {
+      "invalid_coordinate_pairs": 0
+    }
+  },
+  "public_transport_sample.json": {
+    "rows": 0,
+    "top_level_fields": [
+      "source",
+      "documentation",
+      "request_date",
+      "status",
+      "records",
+      "note"
+    ],
+    "status": "not_fetched_no_api_key",
+    "file_size_bytes": 289,
+    "encoding": "UTF-8"
+  },
+  "road_segments_sample.geojson": {
+    "rows": 150,
+    "columns_count": 6,
+    "properties": [
+      "highway_type",
+      "maxspeed",
+      "name",
+      "oneway",
+      "osm_way_id",
+      "surface"
+    ],
+    "missing_values_by_property": {
+      "highway_type": 0,
+      "maxspeed": 32,
+      "name": 16,
+      "oneway": 45,
+      "osm_way_id": 0,
+      "surface": 4
+    },
+    "duplicate_osm_way_ids": 0,
+    "invalid_geometry_features": [],
+    "osm_base_timestamp": "2026-10-09T16:56:36Z",
+    "file_size_bytes": 163643,
+    "encoding": "UTF-8"
+  },
+  "route_measurements.csv": {
+    "rows": 90,
+    "columns_count": 9,
+    "columns": [
+      "from_city_id",
+      "from_city",
+      "to_city_id",
+      "to_city",
+      "distance_m",
+      "duration_sec",
+      "router",
+      "calculated_at",
+      "data_version"
+    ],
+    "inferred_types": {
+      "from_city_id": "string",
+      "from_city": "string",
+      "to_city_id": "string",
+      "to_city": "string",
+      "distance_m": "number",
+      "duration_sec": "number",
+      "router": "string",
+      "calculated_at": "string",
+      "data_version": "empty"
+    },
+    "missing_values": {
+      "from_city_id": 0,
+      "from_city": 0,
+      "to_city_id": 0,
+      "to_city": 0,
+      "distance_m": 0,
+      "duration_sec": 0,
+      "router": 0,
+      "calculated_at": 0,
+      "data_version": 90
+    },
+    "duplicate_rows": 0,
+    "file_size_bytes": 12723,
+    "numeric_ranges": {
+      "distance_m": {
+        "min": 109664.7,
+        "max": 669258.4
+      },
+      "duration_sec": {
+        "min": 5896.1,
+        "max": 36084.8
+      }
+    },
+    "delimiter": ",",
+    "encoding": "UTF-8",
+    "foreign_city_ids": [],
+    "non_positive_distance_rows": 0,
+    "non_positive_duration_rows": 0
+  }
+}
