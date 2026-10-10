@@ -1,0 +1,59 @@
+{
+  "extracted_at_utc": "2026-10-09T16:58:58+00:00",
+  "pilot_cities": [
+    "Москва",
+    "Тверь",
+    "Ярославль",
+    "Владимир",
+    "Рязань",
+    "Тула",
+    "Калуга",
+    "Смоленск",
+    "Брянск",
+    "Орёл"
+  ],
+  "dataset": {
+    "source_url": "https://storage.yandexcloud.net/tochno-st-catalog/Geo/data_intercity_connectivity_162_v20260629/data_intercity_connectivity_162_v20260629_csv.zip",
+    "page_url": "https://tochno.st/datasets/intercity_connectivity",
+    "archive": "intercity_connectivity_source.zip",
+    "member": "data_intercity_connectivity_162_v20260629.csv",
+    "source_rows": 96660,
+    "sample_rows": 270,
+    "columns": [
+      "city_from",
+      "region_from",
+      "oktmo_from",
+      "sber_territory_id_from",
+      "is_capital_from",
+      "population_from",
+      "lat_from",
+      "lon_from",
+      "city_to",
+      "region_to",
+      "oktmo_to",
+      "sber_territory_id_to",
+      "is_capital_to",
+      "population_to",
+      "lat_to",
+      "lon_to",
+      "transport_type",
+      "distance_km",
+      "distance_hr",
+      "missing_reason",
+      "source",
+      "comment"
+    ]
+  },
+  "osm": {
+    "osm_base_timestamp": "2026-10-09T16:56:36Z",
+    "cities_found": 10,
+    "cities_missing": [],
+    "road_features": 150,
+    "roads_bbox": "55.74,37.58,55.78,37.66"
+  },
+  "osrm": {
+    "rows": 90,
+    "data_version": null,
+    "calculated_at": "2026-10-09T16:58:58+00:00"
+  }
+}
