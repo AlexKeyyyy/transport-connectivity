@@ -210,17 +210,21 @@
     }
   },
   "public_transport_sample.json": {
-    "rows": 0,
+    "rows": 354,
     "top_level_fields": [
       "source",
       "documentation",
+      "attribution",
       "request_date",
+      "daily_request_limit",
+      "max_requests_this_run",
+      "requests_made",
       "status",
       "records",
       "note"
     ],
-    "status": "not_fetched_no_api_key",
-    "file_size_bytes": 289,
+    "status": "fetched",
+    "file_size_bytes": 169174,
     "encoding": "UTF-8"
   },
   "road_segments_sample.geojson": {

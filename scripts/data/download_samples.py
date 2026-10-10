@@ -27,6 +27,9 @@ DATASET_URL = (
 DATASET_PAGE = "https://tochno.st/datasets/intercity_connectivity"
 OVERPASS_URL = os.environ.get("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
 OSRM_URL = os.environ.get("OSRM_URL", "https://router.project-osrm.org").rstrip("/")
+YANDEX_RASP_URL = "https://api.rasp.yandex-net.ru/v3.0"
+YANDEX_RASP_DAILY_LIMIT = min(int(os.environ.get("YANDEX_RASP_DAILY_LIMIT", "500")), 500)
+YANDEX_RASP_MAX_REQUESTS = 28
 USER_AGENT = (
     "TransportConnectivityM0Sample/1.0 "
     "(educational project; GitHub: AlexKeyyyy/transport-connectivity)"
@@ -74,6 +77,54 @@ def request_bytes(url: str, data: bytes | None = None) -> bytes:
                 if attempt == 0:
                     sleep(2)
     raise RuntimeError(f"Request failed for {url}: {last_error}") from last_error
+
+
+def load_local_env() -> None:
+    """Load simple KEY=VALUE entries from the ignored local .env file."""
+    env_path = ROOT / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        os.environ.setdefault(name.strip(), value.strip().strip("\"'"))
+
+
+def request_yandex(endpoint: str, params: dict[str, str], api_key: str) -> dict[str, Any]:
+    query = urllib.parse.urlencode({**params, "format": "json", "lang": "ru_RU"})
+    request = urllib.request.Request(
+        f"{YANDEX_RASP_URL}/{endpoint}/?{query}",
+        headers={
+            "Authorization": api_key,
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+        },
+    )
+    if os.environ.get("YANDEX_RASP_BYPASS_PROXY") == "1":
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        open_request = opener.open
+    else:
+        open_request = urllib.request.urlopen
+    with open_request(request, timeout=30) as response:
+        return json.loads(response.read())
+
+
+def reserve_yandex_request() -> None:
+    """Persistently enforce the daily API quota for this local checkout."""
+    usage_path = RAW_DIR / "yandex_rasp_daily_usage.json"
+    today = datetime.now(UTC).date().isoformat()
+    usage = {"date_utc": today, "requests": 0}
+    if usage_path.exists():
+        previous = json.loads(usage_path.read_text(encoding="utf-8-sig"))
+        if previous.get("date_utc") == today:
+            usage = previous
+    if usage["requests"] >= YANDEX_RASP_DAILY_LIMIT:
+        raise ValueError("Configured Yandex Rasp daily request limit has been reached")
+    usage["requests"] += 1
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    usage_path.write_text(json.dumps(usage, indent=2), encoding="utf-8")
 
 
 def fetch_dataset() -> tuple[list[dict[str, str]], dict[str, Any]]:
@@ -315,37 +366,127 @@ def fetch_routes() -> dict[str, Any]:
     return {"rows": len(records), "data_version": data_version, "calculated_at": calculated_at}
 
 
-def create_public_transport_status() -> None:
-    key_present = bool(os.environ.get("YANDEX_RASP_API_KEY"))
-    result = {
-        "source": "Yandex Schedule API",
-        "documentation": "https://yandex.ru/dev/rasp/doc/",
+def fetch_public_transport() -> dict[str, Any]:
+    api_key = os.environ.get("YANDEX_RASP_API_KEY", "").strip()
+    result: dict[str, Any] = {
+        "source": "Яндекс Расписания",
+        "documentation": "https://yandex.ru/dev/rasp/doc/ru/",
+        "attribution": "Источник данных: Яндекс Расписания",
         "request_date": datetime.now(UTC).date().isoformat(),
-        "status": "key_present_but_not_fetched" if key_present else "not_fetched_no_api_key",
+        "daily_request_limit": YANDEX_RASP_DAILY_LIMIT,
+        "max_requests_this_run": YANDEX_RASP_MAX_REQUESTS,
+        "requests_made": 0,
+        "status": "not_fetched_no_api_key",
         "records": [],
-        "note": (
-            "No YANDEX_RASP_API_KEY was available during this extraction; "
-            "no schedule data is included."
-            if not key_present
-            else "API access must be verified before publishing schedule records."
-        ),
     }
+    if not api_key:
+        result["note"] = "YANDEX_RASP_API_KEY is not set; no schedule data was fetched."
+        (SAMPLES_DIR / "public_transport_sample.json").write_text(
+            json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        return result
+
+    records: list[dict[str, Any]] = []
+    try:
+        with (SAMPLES_DIR / "cities.csv").open(encoding="utf-8", newline="") as source:
+            cities = list(csv.DictReader(source))
+        if YANDEX_RASP_MAX_REQUESTS > YANDEX_RASP_DAILY_LIMIT:
+            raise ValueError("Configured Yandex request budget exceeds the daily quota")
+
+        yandex_codes: dict[str, str] = {}
+        for city in cities:
+            if result["requests_made"] >= YANDEX_RASP_MAX_REQUESTS:
+                break
+            reserve_yandex_request()
+            result["requests_made"] += 1
+            nearest = request_yandex(
+                "nearest_settlement",
+                {
+                    "lat": city["latitude"],
+                    "lng": city["longitude"],
+                    "distance": "50",
+                },
+                api_key,
+            )
+            code = nearest.get("code")
+            if code:
+                yandex_codes[city["name"]] = code
+
+        if len(yandex_codes) < 2:
+            raise ValueError("Could not resolve at least two pilot settlements in Yandex Rasp")
+
+        # Sample hub-and-spoke routes in both directions: 10 lookups + up to 18 searches.
+        hub = cities[0]["name"]
+        destinations = [city["name"] for city in cities if city["name"] != hub]
+        route_pairs = [(hub, name) for name in destinations]
+        route_pairs.extend((name, hub) for name in destinations)
+        for from_city, to_city in route_pairs:
+            if from_city not in yandex_codes or to_city not in yandex_codes:
+                continue
+            if result["requests_made"] >= YANDEX_RASP_MAX_REQUESTS:
+                break
+            reserve_yandex_request()
+            result["requests_made"] += 1
+            schedule = request_yandex(
+                "search",
+                {
+                    "from": yandex_codes[from_city],
+                    "to": yandex_codes[to_city],
+                    "transport_types": "plane,train,bus,suburban",
+                    "transfers": "false",
+                    "limit": "20",
+                },
+                api_key,
+            )
+            for segment in schedule.get("segments", []):
+                thread = segment.get("thread") or {}
+                records.append(
+                    {
+                        "from_city": from_city,
+                        "to_city": to_city,
+                        "from_station": (segment.get("from") or {}).get("title"),
+                        "to_station": (segment.get("to") or {}).get("title"),
+                        "transport_type": thread.get("transport_type"),
+                        "route_number": thread.get("number"),
+                        "route_title": thread.get("title"),
+                        "departure": segment.get("departure"),
+                        "arrival": segment.get("arrival"),
+                        "duration_sec": segment.get("duration"),
+                        "carrier": (thread.get("carrier") or {}).get("title"),
+                    }
+                )
+        result["status"] = "fetched"
+        result["note"] = "Direct scheduled services only; source attribution is required."
+    except (OSError, ValueError, KeyError, urllib.error.URLError, TimeoutError) as error:
+        result["status"] = "partial" if records else "request_failed"
+        result["error"] = type(error).__name__
+        result["note"] = "Schedule request failed; see local console output for details."
+        print(f"Yandex Rasp request failed: {type(error).__name__}: {error}")
+
+    result["records"] = records
     (SAMPLES_DIR / "public_transport_sample.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    return result
 
 
 def main() -> None:
+    load_local_env()
     sample_rows, dataset = fetch_dataset()
     osm = fetch_osm(sample_rows)
     routes = fetch_routes()
-    create_public_transport_status()
+    public_transport = fetch_public_transport()
     metadata = {
         "extracted_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
         "pilot_cities": PILOT_CITIES,
         "dataset": dataset,
         "osm": osm,
         "osrm": routes,
+        "yandex_rasp": {
+            "status": public_transport["status"],
+            "requests_made": public_transport["requests_made"],
+            "records": len(public_transport["records"]),
+        },
     }
     (SAMPLES_DIR / "extraction_metadata.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"

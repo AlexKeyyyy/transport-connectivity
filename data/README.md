@@ -15,10 +15,14 @@ py scripts/data/download_samples.py
 py scripts/data/profile_samples.py
 ```
 
-Optional environment variables: `OVERPASS_URL`, `OSRM_URL`, and
-`YANDEX_RASP_API_KEY`. Secrets belong in the environment only. The current
-Yandex sample JSON explicitly records that no API-key-backed records were
-obtained. Full-region PBF data is intentionally not downloaded for this pilot.
+Optional environment variables: `OVERPASS_URL`, `OSRM_URL`,
+`YANDEX_RASP_API_KEY`, and `YANDEX_RASP_DAILY_LIMIT` (capped at 500). The data
+script also reads these from the ignored local `.env` file. With a Yandex key,
+it resolves the 10 pilot settlements and requests direct services between
+Moscow and the other pilot cities in both directions (at most 28 calls total).
+Set `YANDEX_RASP_BYPASS_PROXY=1` to bypass configured HTTP(S) proxies for these
+requests. The JSON records the request count and source attribution. Full-region
+PBF data is intentionally not downloaded for this pilot.
 
 Large PBF extracts, raw downloads, OSRM data, and intermediates must not be
 committed. The ignore rules in `.gitignore` cover these locations and file types.
