@@ -10,6 +10,18 @@
 4. Явные инструкции пользователя имеют приоритет; при изменении архитектурного
    решения обнови связанные документы и запиши значимое решение в ADR.
 
+## Выбор skills
+
+- Issue и передача работы: `$transport-task`; ETL/коннектор: `$transport-data-pipeline`.
+- PostgreSQL: `$supabase-postgres-best-practices`; пространственные операции: `$transport-postgis`.
+- Методика/сценарии графа: `$transport-graph-methodology`; проекция и GDS: `$transport-neo4j`.
+- Поиск cities: `$transport-elasticsearch`; notebook: `$jupyter-notebook`.
+- Перед сдачей используй `$transport-verify`. Читай только нужные skills/references.
+- Skills установлены в `.agents/skills/`; происхождение и адаптации — `.agents/skills-lock.json`.
+  Не устанавливай runtime-зависимости или сервисы только из-за примера в skill.
+- Установленные версии и реальные контракты важнее чужих общих примеров.
+  Уже данное пользователем разрешение на действие не требует повторного запроса из-за skill.
+
 ## Архитектура
 
 - Следуй [docs/architecture.md](docs/architecture.md) и контракту текущей задачи.
@@ -40,7 +52,7 @@
 - Тестируй значимое поведение: преобразования, единицы, пропуски, ID, ошибки,
   повторный запуск. Маленькие fixtures; live API не нужны для обычного pytest.
 - БД и миграции проверяй интеграционно, когда они появляются.
-- Запускай `python -m pytest`, `python -m ruff check` и проверки текущего Issue.
+- Запускай `python scripts/dev/check.py` (harness, Ruff, pytest) и проверки текущего Issue.
   Для документации проверь ссылки и согласованность. Не выдавай smoke-тесты за
   подтверждение корректности полного pipeline.
 

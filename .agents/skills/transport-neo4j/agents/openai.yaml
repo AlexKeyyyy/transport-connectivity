@@ -1,0 +1,4 @@
+interface:
+  display_name: "transport-neo4j"
+  short_description: "Версии графа, Cypher и проверенные GDS-расчёты"
+  default_prompt: "Используй $transport-neo4j для текущей задачи transport-connectivity."

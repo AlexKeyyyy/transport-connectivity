@@ -1,0 +1,4 @@
+interface:
+  display_name: "transport-data-pipeline"
+  short_description: "Загрузка, нормализация и полный прогон данных"
+  default_prompt: "Используй $transport-data-pipeline для текущей задачи transport-connectivity."

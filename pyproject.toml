@@ -31,6 +31,8 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.ruff]
+# Keep the pinned third-party notebook helper unchanged; integrity is checked separately.
+extend-exclude = [".agents/skills/jupyter-notebook"]
 line-length = 100
 target-version = "py312"
 

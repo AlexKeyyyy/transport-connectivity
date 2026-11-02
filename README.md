@@ -57,8 +57,7 @@ source .venv/bin/activate
 # Windows PowerShell:
 # .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-python -m pytest
-python -m ruff check
+python scripts/dev/check.py
 ```
 
 Локальные настройки — через environment variables или игнорируемый `.env`
@@ -73,5 +72,6 @@ Issue → ветка от актуального main → PR → review → merg
 
 - [Архитектура](docs/architecture.md): модули, данные и границы.
 - [Документация](docs/README.md): материалы проекта.
-- [Skills для команды](docs/skills.md): проверенные кандидаты и применение.
+- [Skills для команды](docs/skills.md): установленный общий набор в `.agents/skills/`.
+- [Harness](docs/harness.md): контекст, проверки и передача работы между сессиями.
 - [AGENTS.md](AGENTS.md): правила работы coding-агентов.
