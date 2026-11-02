@@ -6,7 +6,7 @@
 python scripts/dev/check.py
 ```
 
-Общая offline-проверка запускает harness checks, Ruff и pytest. Предварительно
+Общая offline-проверка запускает harness checks, Ruff lint/format и pytest. Предварительно
 нужны dev-зависимости из `python -m pip install -e ".[dev]"`.
 
 ```bash

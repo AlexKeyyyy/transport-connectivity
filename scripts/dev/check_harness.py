@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import re
+import tomllib
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
@@ -53,6 +54,44 @@ def check_links(root: Path, paths: list[Path]) -> list[str]:
                 destination = (path.parent / unquote(parsed.path)).resolve()
                 if not destination.is_relative_to(root) or not destination.exists():
                     errors.append(f"{path.relative_to(root)}: broken local link {target}")
+    return errors
+
+
+def validate_agent_profiles(root: Path) -> list[str]:
+    """Validate the project subset of the documented standalone Codex agent format."""
+    config_path = root / ".codex/config.toml"
+    directory = root / ".codex/agents"
+    if not config_path.exists() and not directory.exists():
+        return []
+    errors: list[str] = []
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        cap = config["agents"]["max_concurrent_threads_per_session"]
+        if type(cap) is not int or cap < 1:
+            errors.append(".codex: parallelism cap must be a positive integer")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        errors.append(f".codex: invalid project config: {exc}")
+    profiles = sorted(directory.glob("*.toml"))
+    if not profiles:
+        errors.append(".codex: no agent profiles")
+    names: set[str] = set()
+    ignored = {"sandbox_mode", "approval_policy", "model_provider", "mcp_servers"}
+    for path in profiles:
+        try:
+            profile = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            errors.append(f"{path.name}: invalid agent TOML: {exc}")
+            continue
+        for field in ("name", "description", "developer_instructions"):
+            if not isinstance(profile.get(field), str) or not profile[field].strip():
+                errors.append(f"{path.name}: missing agent {field}")
+        name = profile.get("name")
+        if isinstance(name, str):
+            if name in names or name != path.stem:
+                errors.append(f"{path.name}: duplicate name or name differs from filename")
+            names.add(name)
+        if ignored.intersection(profile):
+            errors.append(f"{path.name}: permissions/provider belong to the parent session")
     return errors
 
 
@@ -153,6 +192,7 @@ def validate_harness(root: Path) -> list[str]:
         if not path.is_file():
             errors.append(f"missing document {path.relative_to(root)}")
     errors.extend(check_links(root, [p for p in owned_docs if p.is_file()]))
+    errors.extend(validate_agent_profiles(root))
     return errors
 
 
@@ -165,7 +205,7 @@ def main() -> int:
         for error in errors:
             print(f"ERROR: {error}")
         return 1
-    print("Harness OK: skill discovery, pinned files, provenance and local links")
+    print("Harness OK: skills, pinned files, local links and Codex agent profiles")
     return 0
 
 

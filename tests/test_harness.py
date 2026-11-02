@@ -12,7 +12,9 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-VALIDATE = runpy.run_path(str(ROOT / "scripts/dev/check_harness.py"))["validate_harness"]
+CHECKS = runpy.run_path(str(ROOT / "scripts/dev/check_harness.py"))
+VALIDATE = CHECKS["validate_harness"]
+VALIDATE_AGENTS = CHECKS["validate_agent_profiles"]
 
 
 @pytest.fixture
@@ -83,7 +85,12 @@ def test_notebook_helper_creates_valid_notebook_and_preserves_existing_file(
     command = [
         sys.executable,
         str(ROOT / ".agents/skills/jupyter-notebook/scripts/new_notebook.py"),
-        "--kind", kind, "--title", "Transport experiment", "--out", str(output),
+        "--kind",
+        kind,
+        "--title",
+        "Transport experiment",
+        "--out",
+        str(output),
     ]
     result = subprocess.run(command, capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stderr
@@ -95,3 +102,25 @@ def test_notebook_helper_creates_valid_notebook_and_preserves_existing_file(
     repeated = subprocess.run(command, capture_output=True, text=True, check=False)
     assert repeated.returncode != 0
     assert output.read_bytes() == original
+
+
+@pytest.mark.parametrize("change", [None, "invalid-toml", "missing-field", "ignored-permission"])
+def test_agent_profile_validation(tmp_path: Path, change: str | None) -> None:
+    directory = tmp_path / ".codex/agents"
+    directory.mkdir(parents=True)
+    (tmp_path / ".codex/config.toml").write_text(
+        "[agents]\nmax_concurrent_threads_per_session = 2\n", encoding="utf-8"
+    )
+    profile = (
+        'name = "reviewer"\ndescription = "Review a concrete diff"\n'
+        'developer_instructions = "Return evidence; do not edit source files."\n'
+    )
+    if change == "invalid-toml":
+        profile += "broken = [\n"
+    elif change == "missing-field":
+        profile = 'name = "reviewer"\ndescription = "Review"\n'
+    elif change == "ignored-permission":
+        profile += 'sandbox_mode = "read-only"\n'
+    (directory / "reviewer.toml").write_text(profile, encoding="utf-8")
+    errors = VALIDATE_AGENTS(tmp_path)
+    assert bool(errors) == (change is not None)
