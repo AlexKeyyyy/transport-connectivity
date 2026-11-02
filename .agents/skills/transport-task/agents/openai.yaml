@@ -1,0 +1,4 @@
+interface:
+  display_name: "transport-task"
+  short_description: "Короткие Issues и передача работы команде"
+  default_prompt: "Используй $transport-task для текущей задачи transport-connectivity."

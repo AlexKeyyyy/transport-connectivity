@@ -1,0 +1,4 @@
+interface:
+  display_name: "transport-graph-methodology"
+  short_description: "Смысл графа, веса и допустимые сценарии"
+  default_prompt: "Используй $transport-graph-methodology для текущей задачи transport-connectivity."

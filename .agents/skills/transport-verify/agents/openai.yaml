@@ -1,0 +1,4 @@
+interface:
+  display_name: "transport-verify"
+  short_description: "Проверка изменения и доказательства готовности"
+  default_prompt: "Используй $transport-verify для текущей задачи transport-connectivity."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "transport-elasticsearch"
+  short_description: "Поиск городов и восстановимый индекс"
+  default_prompt: "Используй $transport-elasticsearch для текущей задачи transport-connectivity."

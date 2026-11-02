@@ -1,0 +1,4 @@
+interface:
+  display_name: "transport-postgis"
+  short_description: "CRS, расстояния и пространственная корректность"
+  default_prompt: "Используй $transport-postgis для текущей задачи transport-connectivity."

@@ -1,0 +1,3 @@
+# skills-lock.json checks exact upstream/project bytes on Linux, macOS and Windows.
+# Disable newline conversion for this tree; binary assets stay byte-for-byte intact.
+.agents/** -text
