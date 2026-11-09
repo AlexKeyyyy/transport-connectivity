@@ -1,0 +1,37 @@
+{
+  "snapshot_id": "intercity-20260629",
+  "contract_version": "1.0.0",
+  "code_commit": "d605a73cadea",
+  "input_csv_path": "data/raw/intercity-20260629/data_intercity_connectivity_162_v20260629.csv",
+  "input_csv_sha256": "aed8463339b988a7c9ac81aa976a4fc25c152e4066b551d25cbdcc16ebe16d53",
+  "started_at_utc": "2026-11-09T17:45:45+00:00",
+  "finished_at_utc": "2026-11-09T17:46:11+00:00",
+  "elapsed_seconds": 25.490261,
+  "peak_memory_value": 114331324,
+  "peak_memory_method": "python_tracemalloc_bytes",
+  "rows_read": 96660,
+  "rows_written": 96660,
+  "rows_rejected": 0,
+  "duplicates_removed": 0,
+  "balance_valid": true,
+  "balance_formula": "rows_read == rows_written + rows_rejected + duplicates_removed",
+  "cities_written": 180,
+  "city_attribute_conflicts": 0,
+  "transport_counts": {
+    "air": 32220,
+    "rail": 32220,
+    "road": 32220
+  },
+  "missing_route_rows_written": 32230,
+  "missing_reason_counts": {
+    "CD": 64430,
+    "Маршрут не найден": 32230
+  },
+  "rejection_reason_counts": {},
+  "semantic_collisions_count": 0,
+  "output_files_sha256": {
+    "cities.csv": "c36073a09c7af563bdcb9ac1f61609dc5563d566254a40d70be830ec365973ca",
+    "route_measurements.csv": "407b94bb9021a6f16e5506657b05ee7b2f2394699575351432c62c0b34f33558",
+    "rejected_rows.csv": "07282ba1b0cb4e8deb401d5c2739d347eb311ea087f28ea201952b3d2f63c275"
+  }
+}
