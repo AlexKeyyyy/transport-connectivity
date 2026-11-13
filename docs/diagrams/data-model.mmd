@@ -1,0 +1,186 @@
+---
+title: Модель данных transport-connectivity (PostgreSQL/PostGIS)
+---
+erDiagram
+    %% Исходный слой
+    data_source ||--o{ data_snapshot : "публикует"
+    data_snapshot ||--o{ load_run : "обрабатывается"
+    load_run ||--o{ rejected_row : "отклоняет"
+
+    %% Нормализованный слой
+    data_snapshot ||--o{ city : "атрибуты из"
+    city ||--|{ city_external_id : "имеет коды"
+    data_snapshot ||--o{ city_external_id : "соответствие из"
+    data_snapshot ||--o{ route_measurement : "содержит"
+    city ||--o{ route_measurement : "отправление"
+    city ||--o{ route_measurement : "назначение"
+    data_snapshot ||--o{ road_segment : "содержит"
+    city |o--o{ station : "расположена в"
+    data_snapshot ||--o{ transport_connection : "содержит"
+    data_snapshot ||--o{ station : "содержит"
+    station ||--o{ transport_connection : "отправление"
+    station ||--o{ transport_connection : "прибытие"
+
+    %% Аналитический слой
+    graph_snapshot ||--|{ graph_snapshot_input : "использует"
+    data_snapshot ||--o{ graph_snapshot_input : "входит в"
+    load_run ||--o{ graph_snapshot_input : "версия загрузки"
+    graph_snapshot ||--o{ graph_node : "состоит из"
+    city ||--o{ graph_node : "вершина"
+    graph_node ||--o{ graph_edge : "начало"
+    graph_node ||--o{ graph_edge : "конец"
+    route_measurement |o--o{ graph_edge : "основание"
+    graph_snapshot ||--o{ analysis_run : "анализируется"
+    analysis_run ||--o{ metric_result : "даёт"
+    city ||--o{ metric_result : "город"
+    city |o--o{ metric_result : "второй город пары"
+
+    data_source {
+        text source_id PK "tochno_intercity, osm, osrm_public, yandex_rasp"
+        text name
+        text url
+        text license
+        text attribution
+    }
+    data_snapshot {
+        text snapshot_id PK "tochno_intercity_v20260629"
+        text source_id FK
+        text source_version
+        timestamptz retrieved_at "UTC"
+        text file_name
+        text sha256 UK
+        bigint size_bytes
+        integer record_count
+        jsonb manifest
+    }
+    load_run {
+        uuid load_run_id PK
+        text snapshot_id FK
+        text contract_version
+        text code_commit
+        text status "running, success, success_with_rejections, failed"
+        timestamptz started_at
+        timestamptz finished_at
+        integer rows_read "= written + rejected"
+        integer rows_written
+        integer rows_rejected
+        jsonb report
+    }
+    rejected_row {
+        uuid load_run_id PK, FK
+        integer source_row_number PK
+        text reject_reason
+        text detail
+        json raw "ключи в порядке файла"
+    }
+    city {
+        uuid city_id PK "uuid5 от Sber ID"
+        text name "не ключ"
+        text region
+        integer population ">= 0"
+        geometry location "Point, SRID 4326"
+        text attributes_snapshot_id FK
+    }
+    city_external_id {
+        text id_namespace PK "sber_territory, oktmo, osm, yandex_settlement"
+        text external_id PK "строка как в источнике"
+        uuid city_id FK
+        text snapshot_id FK
+    }
+    route_measurement {
+        uuid measurement_id PK "uuid5"
+        text snapshot_id FK
+        integer source_row_number UK "вместе с snapshot_id"
+        uuid from_city_id FK
+        uuid to_city_id FK "не равен from"
+        text transport_type "road, rail, air; UK snapshot+from+to+type"
+        numeric distance_m "метры, NULL без маршрута"
+        numeric duration_sec "секунды, NULL без маршрута"
+        text missing_reason_raw
+        text source_raw
+        text comment_raw
+    }
+    road_segment {
+        uuid road_segment_id PK
+        text snapshot_id FK
+        bigint osm_way_id UK "вместе с snapshot_id"
+        text highway
+        text name
+        text oneway
+        text maxspeed_raw
+        text surface
+        geometry geom "LineString, SRID 4326"
+    }
+    station {
+        uuid station_id PK "проект"
+        text snapshot_id FK
+        text id_namespace UK
+        text external_code UK
+        text name
+        text station_type
+        uuid city_id FK "NULL до сопоставления"
+        text time_zone "IANA"
+        geometry location "Point, SRID 4326"
+    }
+    transport_connection {
+        uuid connection_id PK "проект, ключ в #15"
+        text snapshot_id FK
+        uuid from_station_id FK
+        uuid to_station_id FK
+        text transport_type
+        text thread_uid
+        text route_number
+        text carrier
+        date service_date
+        timestamptz departure_at
+        timestamptz arrival_at
+        integer duration_sec
+    }
+    graph_snapshot {
+        uuid graph_snapshot_id PK
+        text methodology_version
+        jsonb parameters
+        boolean is_directed
+        text status "building, ready, superseded, failed"
+        text code_commit
+        timestamptz created_at
+    }
+    graph_snapshot_input {
+        uuid graph_snapshot_id PK, FK
+        text snapshot_id PK, FK
+        uuid load_run_id FK "опубликованная загрузка"
+    }
+    graph_node {
+        uuid graph_snapshot_id PK, FK
+        uuid city_id PK, FK
+    }
+    graph_edge {
+        uuid graph_edge_id PK
+        uuid graph_snapshot_id FK
+        uuid from_city_id FK "вершина версии; без направления from < to"
+        uuid to_city_id FK "вершина этой версии"
+        text transport_type
+        numeric weight "> 0, меньше = лучше"
+        text weight_unit "sec, m"
+        uuid measurement_id FK "может быть NULL"
+    }
+    analysis_run {
+        uuid analysis_run_id PK
+        uuid graph_snapshot_id FK
+        text algorithm
+        text engine
+        jsonb parameters
+        jsonb scenario "NULL = базовый граф"
+        text code_commit
+        text status "running, success, failed"
+        timestamptz started_at
+        timestamptz finished_at
+    }
+    metric_result {
+        bigint metric_result_id PK
+        uuid analysis_run_id FK
+        text metric
+        uuid city_id FK "NULL = показатель графа"
+        uuid target_city_id FK "для показателей пары"
+        double value "NULL = не определено"
+    }
