@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Sequence
+from datetime import date
 from pathlib import Path
 
 from transport_connectivity.connector import (
@@ -20,6 +22,16 @@ from transport_connectivity.processor import (
     DEFAULT_OUTPUT_ROOT,
     ProcessingError,
     process_snapshot,
+)
+from transport_connectivity.rasp_connector import (
+    DEFAULT_CITIES_PATH,
+    DEFAULT_QUOTA_PATH,
+    DEFAULT_RAW_ROOT,
+    DailyQuota,
+    RaspClient,
+    RaspError,
+    collect,
+    snapshot_dir,
 )
 
 PACKAGE_DIR = Path(__file__).resolve().parent
@@ -73,6 +85,44 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_OUTPUT_ROOT,
         help="Root for normalized snapshots (default: %(default)s).",
+    )
+
+    rasp = subparsers.add_parser(
+        "rasp-download",
+        help="Collect or continue collecting direct trains and flights from Yandex Rasp.",
+        description=(
+            "Request what is not stored yet for date D, within the daily quota, and write "
+            "manifest.json to <raw-root>/yandex_rasp_<D>/. Run again on the next day to "
+            "continue. The key is read from the YANDEX_RASP_API_KEY environment variable."
+        ),
+    )
+    rasp.add_argument(
+        "--date",
+        type=date.fromisoformat,
+        required=True,
+        help="Service date D, YYYY-MM-DD; one weekday for the whole collection.",
+    )
+    rasp.add_argument(
+        "--cities",
+        type=Path,
+        default=DEFAULT_CITIES_PATH,
+        help="Normalized cities.csv to match (default: %(default)s).",
+    )
+    rasp.add_argument(
+        "--raw-root",
+        type=Path,
+        default=DEFAULT_RAW_ROOT,
+        help="Root for raw snapshots (default: %(default)s).",
+    )
+    rasp.add_argument(
+        "--max-requests",
+        type=int,
+        help="Stop after this many API calls in this run (the daily quota applies anyway).",
+    )
+    rasp.add_argument(
+        "--offline",
+        action="store_true",
+        help="Replay stored responses only and report what is still missing.",
     )
     return parser
 
@@ -130,6 +180,32 @@ def run_process(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_rasp_download(args: argparse.Namespace) -> int:
+    try:
+        client = None
+        if not args.offline:
+            client = RaspClient(
+                os.environ.get("YANDEX_RASP_API_KEY", "").strip(),
+                DailyQuota(DEFAULT_QUOTA_PATH),
+                max_requests=args.max_requests,
+            )
+        manifest = collect(
+            args.date, raw_root=args.raw_root, cities_path=args.cities, client=client
+        )
+    except (RaspError, OSError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    state = "complete" if manifest["complete"] else f"incomplete ({manifest['stopped_by']})"
+    print(
+        f"{state}: {manifest['requests_this_run']} requests this run, "
+        f"{manifest['stored_responses']} responses stored in "
+        f"{snapshot_dir(args.raw_root, args.date).as_posix()}",
+        file=sys.stderr,
+    )
+    print(json.dumps(manifest, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # JSON is printed with Cyrillic as is; the Windows console default (cp1251) garbles it.
@@ -139,6 +215,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_download(args)
     if args.command == "process":
         return run_process(args)
+    if args.command == "rasp-download":
+        return run_rasp_download(args)
     raise AssertionError(f"unhandled command {args.command}")
 
 
