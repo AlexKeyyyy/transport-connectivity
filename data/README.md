@@ -1,28 +1,53 @@
-# Data layout
+# Каталог данных
 
-- `raw/` — local source downloads and temporary data; it is ignored by Git.
-- `processed/` — local intermediate data; it is ignored by Git.
-- `samples/` — small, documented samples safe to keep in Git. See
-  [`data/samples/README.md`](samples/README.md) for the current inventory and fields.
+- `raw/` — исходные выгрузки и временные файлы; в Git не попадают.
+- `processed/` — локальные промежуточные данные; в Git не попадают.
+- `samples/` — небольшие описанные срезы, которые можно хранить в Git. Состав и поля —
+  в [`data/samples/README.md`](samples/README.md).
 
-## Sources and reproduction
+## Полный набор «Если быть точным»
 
-The M0-1 pilot sample uses the «Если быть точным» intercity connectivity dataset,
-OSM via Overpass API, and the public OSRM Table endpoint. To refresh the files:
+Команда `download` скачивает закреплённую версию 20260629, проверяет архив и CSV
+и пишет `manifest.json` рядом с файлами:
+
+```bash
+python -m transport_connectivity.cli download            # первый запуск, нужна сеть
+python -m transport_connectivity.cli download --offline  # повтор только из кэша
+```
+
+Результат лежит в `data/raw/tochno_intercity_v20260629/`: ZIP, извлечённый CSV и manifest
+(URL, версия, время загрузки UTC, SHA-256 и размер архива и CSV, кодировка, разделитель,
+число записей, 22 колонки, число городов по Sber ID, сравнение с опубликованным объёмом).
+
+- Архив и CSV проверяются в памяти до записи на диск: целостность ZIP, ровно один CSV,
+  UTF-8, точный заголовок из [контракта данных](../docs/data-contract.md), одинаковое
+  число полей в каждой записи. Непрошедший проверку файл не сохраняется как кэш.
+- Повторный запуск берёт проверенный кэш без сети. Повреждённый кэш скачивается заново,
+  а с `--offline` запуск завершается ошибкой.
+- Сетевые сбои, таймауты и ответы 408/429/5xx повторяются до трёх раз; остальные
+  ошибки HTTP (например, 404) завершают загрузку сразу.
+- Manifest записывается последним: каталог без него не считается готовым снимком.
+
+Копия manifest реальной загрузки —
+[`deliverables/interim/evidence/source-manifest.json`](../deliverables/interim/evidence/source-manifest.json).
+
+## Пилотный срез и его воспроизведение
+
+Пилот M0-1 использует набор «Если быть точным», OSM через Overpass API и публичный
+OSRM Table. Обновить файлы:
 
 ```bash
 py scripts/data/download_samples.py
 py scripts/data/profile_samples.py
 ```
 
-Optional environment variables: `OVERPASS_URL`, `OSRM_URL`,
-`YANDEX_RASP_API_KEY`, and `YANDEX_RASP_DAILY_LIMIT` (capped at 500). The data
-script also reads these from the ignored local `.env` file. With a Yandex key,
-it resolves the 10 pilot settlements and requests direct services between
-Moscow and the other pilot cities in both directions (at most 28 calls total).
-Set `YANDEX_RASP_BYPASS_PROXY=1` to bypass configured HTTP(S) proxies for these
-requests. The JSON records the request count and source attribution. Full-region
-PBF data is intentionally not downloaded for this pilot.
+Необязательные переменные окружения: `OVERPASS_URL`, `OSRM_URL`, `YANDEX_RASP_API_KEY`
+и `YANDEX_RASP_DAILY_LIMIT` (не больше 500). Скрипт читает их и из игнорируемого
+локального `.env`. С ключом Яндекса он находит 10 пилотных городов и запрашивает прямые
+рейсы между Москвой и остальными городами в обе стороны (не больше 28 запросов).
+`YANDEX_RASP_BYPASS_PROXY=1` отключает настроенные HTTP(S)-прокси для этих запросов.
+JSON хранит число запросов и указание источника. Полные региональные PBF для пилота
+не скачиваются.
 
-Large PBF extracts, raw downloads, OSRM data, and intermediates must not be
-committed. The ignore rules in `.gitignore` cover these locations and file types.
+Большие PBF, исходные выгрузки, данные OSRM и промежуточные файлы в Git не добавляются;
+это обеспечивают правила `.gitignore`.
