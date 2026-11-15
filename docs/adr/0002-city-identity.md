@@ -1,7 +1,7 @@
 # ADR 0002. Идентичность города: Sber ID и воспроизводимый UUID5
 
 Статус: принято. Дата: 13 ноября 2026 года. Задача: [#4](https://github.com/AlexKeyyyy/transport-connectivity/issues/4);
-правило согласовано в контракте данных ([PR #17](https://github.com/AlexKeyyyy/transport-connectivity/pull/17)).
+правило согласовано в контракте данных ([data-contract.md](../data-contract.md), раздел 2).
 
 ## Контекст
 
