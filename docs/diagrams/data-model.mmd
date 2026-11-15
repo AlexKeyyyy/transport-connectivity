@@ -1,0 +1,71 @@
+---
+title: Модель данных — исходный и нормализованный слои
+---
+erDiagram
+    data_source ||--o{ data_snapshot : "публикует"
+    data_snapshot ||--o{ load_run : "обрабатывается"
+    load_run ||--o{ rejected_row : "отклоняет"
+    data_snapshot ||--o{ city : "атрибуты из"
+    city ||--|{ city_external_id : "имеет коды"
+    data_snapshot ||--o{ route_measurement : "содержит"
+    city ||--o{ route_measurement : "откуда"
+    city ||--o{ route_measurement : "куда"
+    city |o--o{ station : "станции, проект"
+    station ||--o{ transport_connection : "рейсы, проект"
+    data_snapshot ||--o{ road_segment : "дороги OSM, проект"
+
+    data_source {
+        text source_id PK
+        text name
+        text license
+    }
+    data_snapshot {
+        text snapshot_id PK
+        text source_id FK
+        timestamptz retrieved_at
+        text file_name
+        text sha256 UK
+        integer record_count
+        jsonb manifest
+    }
+    load_run {
+        uuid load_run_id PK
+        text snapshot_id FK
+        text contract_version
+        text code_commit
+        text status
+        integer rows_read "= written + rejected"
+        integer rows_written
+        integer rows_rejected
+    }
+    rejected_row {
+        uuid load_run_id PK, FK
+        integer source_row_number PK
+        text reject_reason
+        json raw
+    }
+    city {
+        uuid city_id PK "uuid5 от Sber ID"
+        text name "не ключ"
+        text region
+        integer population
+        geometry location "Point, 4326"
+        text attributes_snapshot_id FK
+    }
+    city_external_id {
+        text id_namespace PK "sber_territory, oktmo, osm"
+        text external_id PK
+        uuid city_id FK
+        text snapshot_id FK
+    }
+    route_measurement {
+        uuid measurement_id PK
+        text snapshot_id FK
+        integer source_row_number
+        uuid from_city_id FK
+        uuid to_city_id FK
+        text transport_type "road, rail, air"
+        numeric distance_m "NULL = маршрута нет"
+        numeric duration_sec "NULL = маршрута нет"
+        text missing_reason_raw
+    }
