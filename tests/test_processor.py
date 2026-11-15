@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import subprocess
+import sys
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -533,3 +536,17 @@ def test_cli_process_reports_failure(tmp_path: Path, capsys: pytest.CaptureFixtu
 
     assert exit_code == 1
     assert "status failed" in capsys.readouterr().err
+
+
+def test_cli_prints_utf8_json_regardless_of_console_encoding(tmp_path: Path) -> None:
+    row = record(distance_km="", distance_hr="", missing_reason="Маршрут не найден")
+    raw_dir = write_snapshot(tmp_path / "raw", csv_bytes([row]))
+    command = [sys.executable, "-m", "transport_connectivity.cli", "process"]
+    command += ["--input-dir", str(raw_dir), "--output-root", str(tmp_path / "out")]
+    completed = subprocess.run(
+        command, capture_output=True, check=True, env={**os.environ, "PYTHONIOENCODING": "cp1251"}
+    )
+
+    report = json.loads(completed.stdout.decode("utf-8"))
+    assert report["missing_reason_values"] == {"Маршрут не найден": 1}
+    assert report["identity"]["cities"]["total"] == 2

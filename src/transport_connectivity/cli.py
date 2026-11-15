@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import subprocess
 import sys
@@ -124,6 +125,9 @@ def run_process(args: argparse.Namespace) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # JSON is printed with Cyrillic as is; the Windows console default (cp1251) garbles it.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     if args.command == "download":
         return run_download(args)
     if args.command == "process":
