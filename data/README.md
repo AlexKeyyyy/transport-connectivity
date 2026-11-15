@@ -24,12 +24,37 @@ python -m transport_connectivity.cli download --offline  # повтор толь
   число полей в каждой записи. Непрошедший проверку файл не сохраняется как кэш.
 - Повторный запуск берёт проверенный кэш без сети. Повреждённый кэш скачивается заново,
   а с `--offline` запуск завершается ошибкой.
-- Сетевые сбои, таймауты и ответы 408/429/5xx повторяются до трёх раз; остальные
+- Сетевые сбои, таймауты и ответы 408/429/5xx дают до трёх попыток; остальные
   ошибки HTTP (например, 404) завершают загрузку сразу.
 - Manifest записывается последним: каталог без него не считается готовым снимком.
 
 Копия manifest реальной загрузки —
 [`deliverables/interim/evidence/source-manifest.json`](../deliverables/interim/evidence/source-manifest.json).
+
+## Нормализация по контракту
+
+Команда `process` читает снимок, проверенный `download`, и применяет
+[контракт данных](../docs/data-contract.md):
+
+```bash
+python -m transport_connectivity.cli process
+```
+
+- До чтения данных SHA-256 CSV сверяется с manifest, заголовок — с 22 колонками контракта,
+  затем число записей — с manifest.
+  При расхождении запуск завершается ошибкой (статус `failed`) и ничего не публикует.
+- Результат пишется во временный каталог и целиком заменяет
+  `data/normalized/tochno_intercity_v20260629/`: `cities.csv`, `route_measurements.csv`,
+  `rejected_rows.csv` и `run-report.json`. Каталог в Git не попадает.
+- Повторный запуск на том же входе даёт байт-в-байт те же три CSV и не накапливает записи.
+  Отличается только блок `service` отчёта (время, память, версия кода).
+- Баланс: каждая входная запись попадает ровно в один файл —
+  `route_measurements.csv` или `rejected_rows.csv`. Удалённые точные повторы
+  (`exact_duplicate`) лежат в `rejected_rows.csv` и отдельно посчитаны в блоке `duplicates`.
+
+Отчёты двух полных прогонов —
+[`processing-run-1.json`](../deliverables/interim/evidence/processing-run-1.json) и
+[`processing-run-2.json`](../deliverables/interim/evidence/processing-run-2.json).
 
 ## Пилотный срез и его воспроизведение
 

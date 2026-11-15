@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -14,6 +16,13 @@ from transport_connectivity.connector import (
     ConnectorError,
     fetch_full_dataset,
 )
+from transport_connectivity.processor import (
+    DEFAULT_OUTPUT_ROOT,
+    ProcessingError,
+    process_snapshot,
+)
+
+PACKAGE_DIR = Path(__file__).resolve().parent
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -43,7 +52,51 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use only the cached archive; fail instead of going to the network.",
     )
+
+    process = subparsers.add_parser(
+        "process",
+        help="Normalize a downloaded snapshot by the data contract.",
+        description=(
+            "Check the CSV against manifest.json and write cities.csv, route_measurements.csv, "
+            "rejected_rows.csv and run-report.json to <output-root>/<snapshot_id>/. "
+            "Prints the run report to stdout."
+        ),
+    )
+    process.add_argument(
+        "--input-dir",
+        type=Path,
+        default=DEFAULT_RAW_DIR,
+        help="Snapshot directory written by download (default: %(default)s).",
+    )
+    process.add_argument(
+        "--output-root",
+        type=Path,
+        default=DEFAULT_OUTPUT_ROOT,
+        help="Root for normalized snapshots (default: %(default)s).",
+    )
     return parser
+
+
+def current_code_version() -> str:
+    """Commit of the running code, marked dirty when tracked files have local changes."""
+    try:
+        commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=PACKAGE_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        changes = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=PACKAGE_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+    return f"{commit}-dirty" if changes else commit
 
 
 def run_download(args: argparse.Namespace) -> int:
@@ -58,10 +111,34 @@ def run_download(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_process(args: argparse.Namespace) -> int:
+    try:
+        report = process_snapshot(
+            args.input_dir, args.output_root, code_version=current_code_version()
+        )
+    except (ProcessingError, OSError) as error:
+        print(f"error (status failed): {error}", file=sys.stderr)
+        return 1
+    balance = report["balance"]
+    print(
+        f"{report['status']}: {balance['rows_read']} read = "
+        f"{balance['route_measurements']} measurements + {balance['rejected_rows']} rejected; "
+        f"output in {(args.output_root / report['snapshot_id']).as_posix()}",
+        file=sys.stderr,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # JSON is printed with Cyrillic as is; the Windows console default (cp1251) garbles it.
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     if args.command == "download":
         return run_download(args)
+    if args.command == "process":
+        return run_process(args)
     raise AssertionError(f"unhandled command {args.command}")
 
 
