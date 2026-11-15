@@ -1,0 +1,79 @@
+{
+  "snapshot_id": "tochno_intercity_v20260629",
+  "contract_version": "1.0-draft",
+  "source": {
+    "url": "https://storage.yandexcloud.net/tochno-st-catalog/Geo/data_intercity_connectivity_162_v20260629/data_intercity_connectivity_162_v20260629_csv.zip",
+    "csv_sha256": "aed8463339b988a7c9ac81aa976a4fc25c152e4066b551d25cbdcc16ebe16d53",
+    "records": 96660,
+    "columns": 22,
+    "cities_by_sber_id": 180,
+    "matches_published_size": true
+  },
+  "processing": {
+    "status": "success",
+    "balance": {
+      "rows_read": 96660,
+      "route_measurements": 96660,
+      "rejected_rows": 0
+    },
+    "rejections": {
+      "city_identity_missing": 0,
+      "unknown_transport_type": 0,
+      "self_pair": 0,
+      "missing_without_reason": 0,
+      "partial_measurement": 0,
+      "invalid_number": 0,
+      "exact_duplicate": 0,
+      "key_collision": 0
+    },
+    "measurements": {
+      "with_values": 64430,
+      "without_values": 32230,
+      "by_transport_type": {
+        "air": 32220,
+        "rail": 32220,
+        "road": 32220
+      }
+    },
+    "missing_reason_values": {
+      "CD": 64430,
+      "Маршрут не найден": 32230
+    }
+  },
+  "identity": {
+    "cities": 180,
+    "endpoints_without_sber_id": 0,
+    "cities_without_oktmo": 0,
+    "oktmo_conflicts": 0,
+    "attribute_conflicts": 0,
+    "invalid_attributes": 0
+  },
+  "reproducibility": {
+    "runs": 2,
+    "code_version": "637e053360b8e6e74687b81295f631e7867a5925",
+    "outputs_identical": true,
+    "output_sha256": {
+      "cities.csv": "2c41900baaf94e26cc95df5f8bc19b70d6964066808cf9e514a93eeabf969e80",
+      "route_measurements.csv": "719f0d87035242548b72ee0764b9c7f4ddd35a077af708ecfec8bba04d2248e6",
+      "rejected_rows.csv": "c5ba2b79d3a9d0631fa65e1e08849a65550f577050929ab135d58a91b6d71e49"
+    }
+  },
+  "performance": {
+    "duration_sec": [
+      21.776,
+      21.846
+    ],
+    "peak_memory_bytes": 313070316,
+    "peak_memory_method": "tracemalloc: Python allocations from manifest to CSV bytes"
+  },
+  "limitations": [
+    "distance_hr источника — оценка по средней скорости, не расписание",
+    "коды missing_reason (CD, «Маршрут не найден») хранятся дословно, расшифровка источником не подтверждена",
+    "контракт в статусе 1.0-draft, перевод в 1.0 — решение команды"
+  ],
+  "generated_from": [
+    "source-manifest.json",
+    "processing-run-1.json",
+    "processing-run-2.json"
+  ]
+}
