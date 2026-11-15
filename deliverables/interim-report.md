@@ -47,8 +47,8 @@ Elasticsearch](../docs/elasticsearch.md), [план сбора расписан�
 |---|---|
 | Лина, @Linasthsmb | Контракт данных, модель данных, схемы ([#4](https://github.com/AlexKeyyyy/transport-connectivity/issues/4)) |
 | Елисей, @Planwarp | Первая версия коннектора и обработчика ([#7](https://github.com/AlexKeyyyy/transport-connectivity/issues/7), [#8](https://github.com/AlexKeyyyy/transport-connectivity/issues/8)) |
-| Мадина, @mdnmek | Ограничения, объёмы и поиск ([#5](https://github.com/AlexKeyyyy/transport-connectivity/issues/5)) — задача перераспределена, доделана Алексеем |
-| Алексей, @AlexKeyyyy | Пилот, архитектура, приёмка; доработка коннектора и обработчика по контракту, пакет M0, этот отчёт |
+| Мадина, @mdnmek | Задача [#5](https://github.com/AlexKeyyyy/transport-connectivity/issues/5) на этом этапе передана Алексею; Мадина подключается на следующих этапах |
+| Алексей, @AlexKeyyyy | Пилот, архитектура, приёмка; доработка коннектора и обработчика по контракту, ограничения и пакет M0 (#5), этот отчёт |
 
 ## Ограничения
 
