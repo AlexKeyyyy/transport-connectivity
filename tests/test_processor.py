@@ -30,6 +30,8 @@ from transport_connectivity.processor import (
     city_id,
     format_decimal,
     process_snapshot,
+    publish_directory,
+    scale_exactly,
 )
 
 SAMPLE_CSV = Path(__file__).resolve().parents[1] / "data/samples/intercity_connectivity_sample.csv"
@@ -249,6 +251,20 @@ def test_decimal_conversion_has_no_float_noise_or_trailing_zeros(
     value: str, factor: int, expected: str
 ) -> None:
     assert format_decimal(Decimal(value) * factor) == expected
+
+
+def test_long_numbers_are_scaled_without_rounding() -> None:
+    long_value = Decimal("1" * 40 + ".5")
+    assert format_decimal(scale_exactly(long_value, 1000)) == "1" * 40 + "500"
+
+
+def test_missing_coordinates_are_reported_as_invalid(tmp_path: Path) -> None:
+    result = run(tmp_path, [record({**BRYANSK, "lat": "", "lon": ""}, VLADIMIR)])
+
+    assert result.city("953")["latitude"] == ""
+    assert result.report["identity"]["invalid_attributes"] == [
+        {"source_city_id": "953", "attribute": "coordinates", "value": ",", "count": 1}
+    ]
 
 
 def test_directions_are_independent_and_namesakes_are_different_cities(tmp_path: Path) -> None:
@@ -550,3 +566,26 @@ def test_cli_prints_utf8_json_regardless_of_console_encoding(tmp_path: Path) -> 
     report = json.loads(completed.stdout.decode("utf-8"))
     assert report["missing_reason_values"] == {"Маршрут не найден": 1}
     assert report["identity"]["cities"]["total"] == 2
+
+
+def test_publish_restores_copy_left_by_interrupted_swap(tmp_path: Path) -> None:
+    target = tmp_path / "snapshot"
+    previous = tmp_path / ".snapshot.previous"
+    previous.mkdir()
+    (previous / "old.csv").write_text("old", encoding="utf-8")
+
+    publish_directory(target, {"new.csv": b"new"})
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["snapshot"]
+    assert (target / "new.csv").read_bytes() == b"new"
+
+
+def test_snapshot_id_must_be_a_plain_directory_name(tmp_path: Path) -> None:
+    raw_dir = write_snapshot(tmp_path / "raw", csv_bytes([record()]))
+    manifest = json.loads((raw_dir / MANIFEST_FILENAME).read_text(encoding="utf-8"))
+    manifest["snapshot_id"] = "../escape"
+    (raw_dir / MANIFEST_FILENAME).write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ProcessingError, match="Invalid snapshot_id"):
+        process_snapshot(raw_dir, tmp_path / "out")
+    assert not (tmp_path / "escape").exists()

@@ -21,7 +21,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, Inexact, localcontext
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -90,6 +90,8 @@ REJECTED_COLUMNS = ("source_row_number", "reject_reason", "detail", "raw_json")
 _UNSIGNED_DECIMAL = re.compile(r"[0-9]+(?:\.[0-9]+)?")
 _SIGNED_DECIMAL = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
 _UNSIGNED_INTEGER = re.compile(r"[0-9]+")
+# snapshot_id becomes a directory name, so it must not contain path separators.
+_SNAPSHOT_ID = re.compile(r"[a-z0-9_]+")
 
 Row = tuple[str | int | None, ...]
 _BOM = "\N{ZERO WIDTH NO-BREAK SPACE}"
@@ -194,7 +196,18 @@ def format_decimal(value: Decimal) -> str:
     """Write a decimal without exponent and trailing zeros: 694000.0 -> 694000."""
     if value == 0:
         return "0"
-    return format(value.normalize(), "f")
+    with localcontext() as context:
+        # normalize() rounds to the context precision; keep every digit of the value.
+        context.prec = len(value.as_tuple().digits)
+        return format(value.normalize(), "f")
+
+
+def scale_exactly(value: Decimal, factor: int) -> Decimal:
+    """Multiply without the default 28-digit context rounding long inputs."""
+    with localcontext() as context:
+        context.prec = len(value.as_tuple().digits) + len(str(factor))
+        context.traps[Inexact] = True
+        return value * factor
 
 
 def parse_positive(text: str) -> Decimal | None:
@@ -249,6 +262,8 @@ def read_records(path: Path) -> tuple[list[SourceRecord], bool]:
                 start_line = reader.line_num + 1
     except UnicodeDecodeError as error:
         raise ProcessingError(f"Input is not valid UTF-8: {error}") from error
+    except csv.Error as error:
+        raise ProcessingError(f"Input is not valid CSV: {error}") from error
     return records, has_bom
 
 
@@ -277,7 +292,7 @@ def _measurement_problems(record: SourceRecord) -> tuple[list[Problem], str | No
     ]
     if km is None or hours is None:
         return problems, None, None
-    return [], format_decimal(km * 1000), format_decimal(hours * 3600)
+    return [], format_decimal(scale_exactly(km, 1000)), format_decimal(scale_exactly(hours, 3600))
 
 
 def validate_record(record: SourceRecord) -> Measurement | Problem:
@@ -403,7 +418,8 @@ def _collect_city_evidence(
             lat, lon = record.value(f"lat_{end}"), record.value(f"lon_{end}")
             if coordinates := _parse_coordinates(lat, lon):
                 city.coordinates[coordinates] += 1
-            elif lat or lon:
+            else:
+                # Missing coordinates are reported too (contract, section 2).
                 invalid[(sber, "coordinates", f"{lat},{lon}")] += 1
     return evidence, invalid, endpoints
 
@@ -571,7 +587,11 @@ def publish_directory(target: Path, files: dict[str, bytes]) -> None:
             (staging / name).write_bytes(data)
         previous = target.with_name(f".{target.name}.previous")
         if previous.exists():
-            shutil.rmtree(previous)
+            # Left by a run killed mid-swap: it is the last good copy if target is gone.
+            if target.exists():
+                shutil.rmtree(previous)
+            else:
+                previous.rename(target)
         if target.exists():
             target.rename(previous)
         try:
@@ -627,6 +647,8 @@ def process_snapshot(
                 f"Input has {len(records)} records, manifest says {manifest.row_count}"
             )
 
+        if not _SNAPSHOT_ID.fullmatch(manifest.snapshot_id):
+            raise ProcessingError(f"Invalid snapshot_id in manifest: {manifest.snapshot_id!r}")
         result = normalize(records, manifest.snapshot_id)
         rows_out = len(result.measurement_rows) + len(result.rejected_rows)
         if rows_out != len(records):
