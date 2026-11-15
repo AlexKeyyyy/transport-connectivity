@@ -22,6 +22,8 @@ from transport_connectivity.processor import (
     process_snapshot,
 )
 
+PACKAGE_DIR = Path(__file__).resolve().parent
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -79,10 +81,15 @@ def current_code_version() -> str:
     """Commit of the running code, marked dirty when tracked files have local changes."""
     try:
         commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=PACKAGE_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
         changes = subprocess.run(
             ["git", "status", "--porcelain", "--untracked-files=no"],
+            cwd=PACKAGE_DIR,
             capture_output=True,
             text=True,
             check=True,
@@ -109,14 +116,14 @@ def run_process(args: argparse.Namespace) -> int:
         report = process_snapshot(
             args.input_dir, args.output_root, code_version=current_code_version()
         )
-    except ProcessingError as error:
+    except (ProcessingError, OSError) as error:
         print(f"error (status failed): {error}", file=sys.stderr)
         return 1
     balance = report["balance"]
     print(
         f"{report['status']}: {balance['rows_read']} read = "
         f"{balance['route_measurements']} measurements + {balance['rejected_rows']} rejected; "
-        f"output in {report['service']['parameters']['output_dir']}",
+        f"output in {(args.output_root / report['snapshot_id']).as_posix()}",
         file=sys.stderr,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
