@@ -80,12 +80,12 @@
     "invalid_attributes": []
   },
   "service": {
-    "started_at_utc": "2026-11-15T16:40:51+00:00",
-    "finished_at_utc": "2026-11-15T16:41:11+00:00",
-    "duration_sec": 19.444,
-    "peak_memory_bytes": 313069972,
+    "started_at_utc": "2026-11-15T16:48:49+00:00",
+    "finished_at_utc": "2026-11-15T16:49:11+00:00",
+    "duration_sec": 21.846,
+    "peak_memory_bytes": 313070316,
     "peak_memory_method": "tracemalloc: Python allocations from manifest to CSV bytes",
-    "code_version": "dcfcafe9d12bb510d21e92ad4c2f525bf54b8f19",
+    "code_version": "637e053360b8e6e74687b81295f631e7867a5925",
     "parameters": {
       "raw_dir": "data/raw/tochno_intercity_v20260629",
       "output_dir": "data/normalized/tochno_intercity_v20260629"
