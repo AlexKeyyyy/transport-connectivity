@@ -50,3 +50,5 @@ data/processed/*
 # Neo4j / Elasticsearch local state
 neo4j/data/
 elasticsearch/data/
+
+data/normalized/*
