@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
+from transport_connectivity.air_resilience import analyze_air_resilience
 from transport_connectivity.connector import (
     DATASET_URL,
     DEFAULT_RAW_DIR,
@@ -133,6 +134,24 @@ def build_parser() -> argparse.ArgumentParser:
     rasp_process.add_argument("--cities", type=Path, default=DEFAULT_CITIES_PATH)
     rasp_process.add_argument("--raw-root", type=Path, default=DEFAULT_RAW_ROOT)
     rasp_process.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+
+    air_resilience = subparsers.add_parser(
+        "rasp-air-resilience",
+        help="Compare Yandex Rasp air reachability before and after removing Moscow.",
+        description="Verify normalized CSVs and print the offline scenario result as JSON.",
+    )
+    air_resilience.add_argument("--date", type=date.fromisoformat, required=True)
+    air_resilience.add_argument(
+        "--cities-dir",
+        type=Path,
+        default=DEFAULT_CITIES_PATH.parent,
+        help="Directory with cities.csv and its run-report.json (default: %(default)s).",
+    )
+    air_resilience.add_argument(
+        "--rasp-dir",
+        type=Path,
+        help="Directory with direct_links.csv and its run-report.json (default: by date).",
+    )
     return parser
 
 
@@ -231,6 +250,20 @@ def run_rasp_process(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_rasp_air_resilience(args: argparse.Namespace) -> int:
+    try:
+        report = analyze_air_resilience(
+            args.date,
+            cities_dir=args.cities_dir,
+            rasp_dir=args.rasp_dir or snapshot_dir(DEFAULT_OUTPUT_ROOT, args.date),
+        )
+    except (ProcessingError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # JSON is printed with Cyrillic as is; the Windows console default (cp1251) garbles it.
@@ -244,6 +277,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_rasp_download(args)
     if args.command == "rasp-process":
         return run_rasp_process(args)
+    if args.command == "rasp-air-resilience":
+        return run_rasp_air_resilience(args)
     raise AssertionError(f"unhandled command {args.command}")
 
 
