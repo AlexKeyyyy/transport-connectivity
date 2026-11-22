@@ -33,6 +33,7 @@ from transport_connectivity.rasp_connector import (
     collect,
     snapshot_dir,
 )
+from transport_connectivity.rasp_processing import process_rasp_snapshot
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
@@ -124,6 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Replay stored responses only and report what is still missing.",
     )
+    rasp_process = subparsers.add_parser(
+        "rasp-process",
+        help="Verify a complete Yandex snapshot and normalize direct train and flight services.",
+    )
+    rasp_process.add_argument("--date", type=date.fromisoformat, required=True)
+    rasp_process.add_argument("--cities", type=Path, default=DEFAULT_CITIES_PATH)
+    rasp_process.add_argument("--raw-root", type=Path, default=DEFAULT_RAW_ROOT)
+    rasp_process.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     return parser
 
 
@@ -206,6 +215,22 @@ def run_rasp_download(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_rasp_process(args: argparse.Namespace) -> int:
+    try:
+        report = process_rasp_snapshot(
+            args.date,
+            raw_root=args.raw_root,
+            cities_path=args.cities,
+            output_root=args.output_root,
+            code_version=current_code_version(),
+        )
+    except (ProcessingError, RaspError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # JSON is printed with Cyrillic as is; the Windows console default (cp1251) garbles it.
@@ -217,6 +242,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_process(args)
     if args.command == "rasp-download":
         return run_rasp_download(args)
+    if args.command == "rasp-process":
+        return run_rasp_process(args)
     raise AssertionError(f"unhandled command {args.command}")
 
 
