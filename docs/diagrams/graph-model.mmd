@@ -10,7 +10,8 @@ erDiagram
     graph_node ||--o{ graph_edge : "начало"
     graph_node ||--o{ graph_edge : "конец"
     route_measurement |o--o{ graph_edge : "основание"
-    graph_snapshot ||--o{ analysis_run : "анализируется"
+    graph_snapshot |o--o{ analysis_run : "анализируется"
+    data_snapshot |o--o{ analysis_run : "матрица снимка"
     analysis_run ||--o{ metric_result : "даёт"
     city |o--o{ metric_result : "город"
     city |o--o{ metric_result : "второй город пары"
@@ -44,18 +45,23 @@ erDiagram
     }
     analysis_run {
         uuid analysis_run_id PK
-        uuid graph_snapshot_id FK
+        uuid graph_snapshot_id FK "NULL если по снимку"
+        text snapshot_id FK "NULL если по графу"
         text algorithm
-        text engine
+        text engine "python, neo4j-gds"
+        text engine_version
         jsonb parameters
         jsonb scenario "NULL = исходный граф"
-        text status
+        text code_commit
+        text status "running, ready, failed"
+        timestamptz started_at
+        timestamptz finished_at
     }
     metric_result {
-        bigint metric_result_id PK
+        bigserial metric_result_id PK
         uuid analysis_run_id FK
         text metric
         uuid city_id FK
-        uuid target_city_id FK "для пары городов"
-        double value "NULL = не определено"
+        uuid other_city_id FK "для пары городов"
+        numeric value "NULL = не определено"
     }
