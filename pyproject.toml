@@ -15,7 +15,9 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
 ]
-dependencies = []
+dependencies = [
+  "psycopg[binary]==3.2.3",
+]
 
 [project.optional-dependencies]
 dev = [
@@ -29,6 +31,7 @@ packages = ["src/transport_connectivity"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = ["db: requires a dedicated PostgreSQL/PostGIS test database"]
 
 [tool.ruff]
 # Keep the pinned third-party notebook helper unchanged; integrity is checked separately.

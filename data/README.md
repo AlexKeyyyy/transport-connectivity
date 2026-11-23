@@ -142,3 +142,51 @@ JSON хранит число запросов и указание источни
 
 Большие PBF, исходные выгрузки, данные OSRM и промежуточные файлы в Git не добавляются;
 это обеспечивают правила `.gitignore`.
+
+## Загрузка в базу
+
+Из корня репозитория подготовьте снимок командами `download` и `process`,
+скопируйте `.env.example` в `.env` для Docker Compose и задайте те же
+`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER` и
+`POSTGRES_PASSWORD` в окружении CLI, если меняете значения по умолчанию.
+Укажите свободный `POSTGRES_PORT`, если 5432 занят.
+
+```powershell
+docker compose up -d --wait postgres
+python -m transport_connectivity.cli migrate
+python -m transport_connectivity.cli load
+```
+
+Если снимок лежит в другом каталоге, передайте `load --raw-dir … --normalized-dir …`.
+Загрузчик сверяет исходную и выходные контрольные суммы. Повторные вызовы
+`migrate` и `load` пропускают применённые миграции и уже загруженный снимок.
+
+Откройте `docker compose exec postgres psql -U postgres -d transport_connectivity`
+с вашим пользователем и именем базы. Контрольные запросы для чистой базы:
+
+```sql
+SELECT (SELECT count(*) FROM city) AS city,
+       (SELECT count(*) FROM city_external_id) AS city_external_id,
+       (SELECT count(*) FROM route_measurement) AS route_measurement,
+       (SELECT count(*) FROM rejected_row) AS rejected_row,
+       (SELECT count(*) FROM data_snapshot) AS data_snapshot,
+       (SELECT count(*) FROM load_run) AS load_run;
+-- 180 | 360 | 96660 | 0 | 1 | 1
+
+SELECT count(*) FROM city
+WHERE ST_DWithin(location::geography,
+      ST_SetSRID(ST_MakePoint(37.62049, 55.7540584), 4326)::geography, 25000);
+-- 11
+
+SELECT city_id FROM city_external_id
+WHERE id_namespace = 'sber_territory' AND external_id = '953';
+-- 83c80e94-954a-5182-b2dd-a4aa219e6400
+```
+
+Если в локальной базе уже применялась предварительная схема из PR #41,
+используйте новую пустую базу и загрузите снимок повторно. Миграции отмечаются
+по имени файла, а исходные номера строк восстанавливаются из нормализованного CSV.
+
+Для интеграционных тестов задайте `RUN_DB_TESTS=1` и `POSTGRES_HOST` вместе
+с остальными параметрами `POSTGRES_*` отдельной тестовой базы.
+Команда запуска: `python -m pytest -m db -v`.
