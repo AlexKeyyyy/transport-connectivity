@@ -1,0 +1,23 @@
+---
+config:
+  theme: base
+  themeCSS: "text { font-family: Arial, sans-serif; }"
+  themeVariables:
+    fontSize: "22px"
+    textColor: "#14263d"
+    edgeLabelBackground: "#ffffff"
+    lineColor: "#406183"
+  htmlLabels: false
+  flowchart:
+    nodeSpacing: 30
+    rankSpacing: 40
+    wrappingWidth: 310
+---
+flowchart LR
+    A(["Абакан"]) -->|"SU-1479 · прилёт 11:00 МСК"| M["Шереметьево<br/>Стыковка 4 ч 25 мин"]
+    M -->|"SU-1496 · вылет 15:25 МСК"| G(["Грозный"])
+
+    classDef endpoint fill:#edf3fa,stroke:#406183,color:#14263d,stroke-width:2px
+    classDef hub fill:#fff0d8,stroke:#b6661c,color:#452a12,stroke-width:2px
+    class A,G endpoint
+    class M hub
