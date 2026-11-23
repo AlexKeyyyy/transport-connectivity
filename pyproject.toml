@@ -17,6 +17,7 @@ classifiers = [
 ]
 dependencies = [
   "psycopg[binary]==3.2.3",
+  "elasticsearch==8.19.0",
 ]
 
 [project.optional-dependencies]
