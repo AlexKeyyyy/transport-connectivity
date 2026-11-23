@@ -18,6 +18,10 @@ from transport_connectivity.connector import (
     ConnectorError,
     fetch_full_dataset,
 )
+from transport_connectivity.db.load import (
+    DEFAULT_NORMALIZED_DIR,
+    load_snapshot,
+)
 from transport_connectivity.processor import (
     DEFAULT_OUTPUT_ROOT,
     ProcessingError,
@@ -86,6 +90,28 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_OUTPUT_ROOT,
         help="Root for normalized snapshots (default: %(default)s).",
+    )
+
+    subparsers.add_parser(
+        "migrate",
+        help="Run pending PostgreSQL database migrations.",
+    )
+
+    load = subparsers.add_parser(
+        "load",
+        help="Load normalized snapshot data into PostgreSQL.",
+    )
+    load.add_argument(
+        "--raw-dir",
+        type=Path,
+        default=DEFAULT_RAW_DIR,
+        help="Directory containing manifest.json (default: %(default)s).",
+    )
+    load.add_argument(
+        "--normalized-dir",
+        type=Path,
+        default=DEFAULT_NORMALIZED_DIR,
+        help="Directory containing run-report.json and CSVs (default: %(default)s).",
     )
 
     rasp = subparsers.add_parser(
@@ -189,6 +215,43 @@ def run_process(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_migrate() -> int:
+    import psycopg
+
+    from transport_connectivity.db.migrate import get_connection_string, run_migrations
+
+    try:
+        with psycopg.connect(get_connection_string()):
+            pass
+        applied = run_migrations()
+    except Exception as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    if applied:
+        print(f"Applied migrations: {', '.join(applied)}")
+    else:
+        print("No new migrations to apply. Database is up to date.")
+    return 0
+
+
+def run_load(args: argparse.Namespace) -> int:
+    try:
+        result = load_snapshot(
+            raw_dir=args.raw_dir,
+            normalized_dir=args.normalized_dir,
+        )
+    except Exception as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    if result.already_loaded:
+        print(f"Snapshot '{result.snapshot_id}' is already loaded.")
+        return 0
+    print(f"Loaded snapshot '{result.snapshot_id}':")
+    for table, count in result.counts.items():
+        print(f"  {table}: {count}")
+    return 0
+
+
 def run_rasp_download(args: argparse.Namespace) -> int:
     try:
         client = None
@@ -240,6 +303,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_download(args)
     if args.command == "process":
         return run_process(args)
+    if args.command == "migrate":
+        return run_migrate()
+    if args.command == "load":
+        return run_load(args)
     if args.command == "rasp-download":
         return run_rasp_download(args)
     if args.command == "rasp-process":

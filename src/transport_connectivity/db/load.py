@@ -13,7 +13,7 @@ import psycopg
 
 from transport_connectivity.db.migrate import get_connection_string
 
-DEFAULT_RAW_DIR = Path("data/raw/intercity-20260629")
+DEFAULT_RAW_DIR = Path("data/raw/tochno_intercity_v20260629")
 DEFAULT_NORMALIZED_DIR = Path("data/normalized/tochno_intercity_v20260629")
 SOURCE_ID = "tochno_intercity"
 SOURCE_NAME = "Tochno Intercity Connectivity"
@@ -43,26 +43,11 @@ def _load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _load_run_report(normalized_dir: Path) -> dict[str, Any]:
-    for filename in ("run_report.json", "run-report.json"):
-        candidate = normalized_dir / filename
-        if candidate.is_file():
-            return json.loads(candidate.read_text(encoding="utf-8"))
-    raise FileNotFoundError(
-        f"Required run report not found in {normalized_dir} "
-        "(expected run_report.json or run-report.json)"
-    )
-
-
 def _null_if_empty(value: str | None) -> str | None:
     if value is None:
         return None
     stripped = value.strip()
     return stripped if stripped else None
-
-
-def _strip_prefix(value: str, prefix: str) -> str:
-    return value[len(prefix) :] if value.startswith(prefix) else value
 
 
 def _parse_bool(value: str | None, default: bool = False) -> bool:
@@ -80,22 +65,11 @@ def _make_point_ewkt(lon: str | None, lat: str | None) -> str | None:
     return f"SRID=4326;POINT({lon_val} {lat_val})"
 
 
-def _resolve_report_status(report: dict[str, Any]) -> str:
-    raw_status = report.get("status")
-    if raw_status:
-        return str(raw_status)
-    if report.get("balance_valid") is False:
-        return "failed"
-    if int(report.get("rows_rejected", 0)) > 0:
-        return "success_with_rejections"
-    return "success"
-
-
 def _verify_output_hashes(
     normalized_dir: Path,
     report: dict[str, Any],
 ) -> dict[str, Path]:
-    output_meta = report.get("output_files_sha256") or report.get("output") or {}
+    output_meta = report.get("output") or {}
     csv_files = {
         "cities": normalized_dir / "cities.csv",
         "route_measurements": normalized_dir / "route_measurements.csv",
@@ -111,7 +85,7 @@ def _verify_output_hashes(
             expected_entry.get("sha256") if isinstance(expected_entry, dict) else expected_entry
         )
         if not expected_sha:
-            raise ValueError(f"Missing expected sha256 for '{key}' in run report")
+            raise ValueError(f"Missing expected sha256 for '{path.name}' in run-report.json")
 
         actual_sha = _sha256_file(path)
         if actual_sha.lower() != str(expected_sha).lower():
@@ -122,40 +96,23 @@ def _verify_output_hashes(
     return csv_files
 
 
-def _extract_expected_counts(
-    report: dict[str, Any],
-    csv_files: dict[str, Path],
-) -> dict[str, int]:
-    counts = report.get("counts") or report.get("stats") or report
-
-    if "cities_written" in counts:
-        city_expected = int(counts["cities_written"])
-    elif "cities" in counts:
-        city_expected = int(counts["cities"])
-    else:
-        with csv_files["cities"].open("r", encoding="utf-8", newline="") as fh:
-            city_expected = sum(1 for _ in csv.DictReader(fh))
-
-    if "rows_written" in counts:
-        routes_expected = int(counts["rows_written"])
-    elif "route_measurements" in counts:
-        routes_expected = int(counts["route_measurements"])
-    else:
-        with csv_files["route_measurements"].open("r", encoding="utf-8", newline="") as fh:
-            routes_expected = sum(1 for _ in csv.DictReader(fh))
-
-    if "rows_rejected" in counts:
-        rejected_expected = int(counts["rows_rejected"])
-    elif "rejected_rows" in counts:
-        rejected_expected = int(counts["rejected_rows"])
-    else:
-        with csv_files["rejected_rows"].open("r", encoding="utf-8", newline="") as fh:
-            rejected_expected = sum(1 for _ in csv.DictReader(fh))
-
+def _extract_expected_counts(report: dict[str, Any]) -> dict[str, int]:
+    output_meta = report.get("output") or {}
+    balance = report.get("balance") or {}
     return {
-        "city": city_expected,
-        "route_measurement": routes_expected,
-        "rejected_row": rejected_expected,
+        "city": int(output_meta["cities.csv"]["rows"]),
+        "route_measurement": int(
+            balance.get(
+                "route_measurements",
+                output_meta["route_measurements.csv"]["rows"],
+            )
+        ),
+        "rejected_row": int(
+            balance.get(
+                "rejected_rows",
+                output_meta["rejected_rows.csv"]["rows"],
+            )
+        ),
     }
 
 
@@ -165,9 +122,9 @@ def load_snapshot(
 ) -> LoadResult:
     """Validate and load a normalized snapshot into PostgreSQL in one transaction."""
     manifest = _load_json(raw_dir / "manifest.json")
-    report = _load_run_report(normalized_dir)
+    report = _load_json(normalized_dir / "run-report.json")
 
-    status = _resolve_report_status(report)
+    status = str(report.get("status") or "")
     if status not in ALLOWED_REPORT_STATUSES:
         raise ValueError(
             f"Unsupported run-report status '{status}'. "
@@ -175,32 +132,28 @@ def load_snapshot(
         )
 
     csv_files = _verify_output_hashes(normalized_dir, report)
-    expected_counts = _extract_expected_counts(report, csv_files)
+    expected_counts = _extract_expected_counts(report)
 
-    snapshot_id = str(manifest.get("snapshot_id") or report["snapshot_id"])
-    source_sha256 = str(
-        manifest.get("csv_sha256") or manifest.get("sha256") or report.get("input_csv_sha256") or ""
-    )
+    snapshot_id = str(manifest["snapshot_id"])
+    source_sha256 = str(manifest.get("csv_sha256") or manifest.get("sha256") or "")
     if not source_sha256:
-        raise ValueError("Missing source sha256 in manifest.json and run report")
+        raise ValueError("Missing csv_sha256 in manifest.json")
 
-    record_count = int(manifest.get("row_count") or report.get("rows_read") or 0)
-    retrieved_at = (
-        manifest.get("downloaded_at_utc")
-        or manifest.get("retrieved_at")
-        or report.get("finished_at_utc")
-    )
-    if not retrieved_at:
-        raise ValueError("Missing timestamp in manifest.json and run report")
+    record_count = int(manifest["row_count"])
+    retrieved_at = manifest["downloaded_at_utc"]
+
+    balance = report.get("balance") or {}
+    duplicates = report.get("duplicates") or {}
+    service = report.get("service") or {}
 
     contract_version = str(report.get("contract_version", ""))
-    code_commit = str(report.get("code_commit", ""))
-    rows_read = int(report.get("rows_read", expected_counts["route_measurement"]))
-    rows_written = int(report.get("rows_written", expected_counts["route_measurement"]))
-    rows_rejected = int(report.get("rows_rejected", expected_counts["rejected_row"]))
-    duplicates_removed = int(report.get("duplicates_removed", 0))
-    started_at = report.get("started_at_utc") or retrieved_at
-    finished_at = report.get("finished_at_utc") or retrieved_at
+    code_commit = str(service.get("code_version") or report.get("code_commit") or "")
+    rows_read = int(balance.get("rows_read", expected_counts["route_measurement"]))
+    rows_written = expected_counts["route_measurement"]
+    rows_rejected = expected_counts["rejected_row"]
+    duplicates_removed = int(duplicates.get("exact_duplicate", 0))
+    started_at = service.get("started_at_utc") or retrieved_at
+    finished_at = service.get("finished_at_utc") or retrieved_at
 
     conn_str = get_connection_string()
     with psycopg.connect(conn_str) as conn:
@@ -310,17 +263,17 @@ def load_snapshot(
                         """
                     ) as copy:
                         for row in reader:
-                            city_uuid = _strip_prefix(row["city_id"].strip(), "city-")
+                            city_id = row["city_id"].strip()
                             oktmo = _null_if_empty(row.get("oktmo"))
                             is_capital = _parse_bool(row.get("is_capital"), default=False)
                             population = int(float(row["population"]))
                             location = _make_point_ewkt(
-                                row.get("longitude") or row.get("lon"),
-                                row.get("latitude") or row.get("lat"),
+                                row.get("longitude"),
+                                row.get("latitude"),
                             )
                             copy.write_row(
                                 (
-                                    city_uuid,
+                                    city_id,
                                     row["name"],
                                     row["region"],
                                     oktmo,
@@ -331,15 +284,13 @@ def load_snapshot(
                                 )
                             )
 
-                            raw_source_id = _null_if_empty(
-                                row.get("source_city_id") or row.get("sber_territory_id")
-                            )
-                            if raw_source_id is not None:
-                                sber_id = _strip_prefix(raw_source_id, "sber:")
-                                external_id_rows.append((city_uuid, "sber_territory", sber_id))
+                            id_namespace = _null_if_empty(row.get("id_namespace"))
+                            source_city_id = _null_if_empty(row.get("source_city_id"))
+                            if id_namespace is not None and source_city_id is not None:
+                                external_id_rows.append((city_id, id_namespace, source_city_id))
 
                             if oktmo is not None:
-                                external_id_rows.append((city_uuid, "oktmo", oktmo))
+                                external_id_rows.append((city_id, "oktmo", oktmo))
 
                 # 5. Bulk COPY: city_external_id
                 with cur.copy(
@@ -374,23 +325,18 @@ def load_snapshot(
                         """
                     ) as copy:
                         for row in reader:
-                            meas_uuid = _strip_prefix(row["measurement_id"].strip(), "meas-")
-                            from_uuid = _strip_prefix(row["from_city_id"].strip(), "city-")
-                            to_uuid = _strip_prefix(row["to_city_id"].strip(), "city-")
                             copy.write_row(
                                 (
-                                    meas_uuid,
+                                    row["measurement_id"].strip(),
                                     snapshot_id,
-                                    from_uuid,
-                                    to_uuid,
+                                    row["from_city_id"].strip(),
+                                    row["to_city_id"].strip(),
                                     row["transport_type"].strip(),
                                     _null_if_empty(row.get("distance_m")),
                                     _null_if_empty(row.get("duration_sec")),
-                                    _null_if_empty(
-                                        row.get("missing_reason_raw") or row.get("missing_reason")
-                                    ),
-                                    _null_if_empty(row.get("source_raw") or row.get("source")),
-                                    _null_if_empty(row.get("comment_raw") or row.get("comment")),
+                                    _null_if_empty(row.get("missing_reason_raw")),
+                                    _null_if_empty(row.get("source_raw")),
+                                    _null_if_empty(row.get("comment_raw")),
                                 )
                             )
 
@@ -409,16 +355,13 @@ def load_snapshot(
                         """
                     ) as copy:
                         for row in reader:
-                            raw_json = _null_if_empty(row.get("raw_json")) or json.dumps(
-                                row, ensure_ascii=False
-                            )
                             copy.write_row(
                                 (
                                     load_run_id,
                                     int(row["source_row_number"]),
-                                    row["rejection_reason"],
-                                    _null_if_empty(row.get("rejection_detail")),
-                                    raw_json,
+                                    row["reject_reason"],
+                                    _null_if_empty(row.get("detail")),
+                                    row["raw_json"],
                                 )
                             )
 
