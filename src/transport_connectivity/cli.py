@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import io
 import json
 import os
@@ -11,6 +12,8 @@ import sys
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+
+from elasticsearch import Elasticsearch
 
 from transport_connectivity.air_resilience import analyze_air_resilience
 from transport_connectivity.connector import (
@@ -39,6 +42,11 @@ from transport_connectivity.rasp_connector import (
     snapshot_dir,
 )
 from transport_connectivity.rasp_processing import process_rasp_snapshot
+from transport_connectivity.search import (
+    city_document,
+    create_index,
+    index_cities,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
@@ -178,6 +186,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Directory with direct_links.csv and its run-report.json (default: by date).",
     )
+
+    index_cities_parser = subparsers.add_parser(
+        "index-cities",
+        help="Пересоздать индекс cities_v1 и загрузить все города из cities.csv.",
+    )
+    index_cities_parser.add_argument(
+        "--cities-csv",
+        type=Path,
+        default=Path("data/normalized/tochno_intercity_v20260629/cities.csv"),
+        help="Путь к cities.csv (default: %(default)s).",
+    )
+
     return parser
 
 
@@ -323,6 +343,34 @@ def run_rasp_air_resilience(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_index_cities(args: argparse.Namespace) -> int:
+    es_url = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
+    client = Elasticsearch(es_url)
+
+    try:
+        with open(args.cities_csv, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            documents = [city_document(row) for row in reader]
+    except OSError as error:
+        print(f"error: cannot read {args.cities_csv}: {error}", file=sys.stderr)
+        return 1
+
+    try:
+        create_index(client, "cities_v1")
+        index_cities(client, "cities_v1", documents)
+
+        # Пересоздаем алиас cities -> cities_v1
+        client.indices.delete_alias(name="cities", index="*", ignore_unavailable=True)
+        client.indices.put_alias(index="cities_v1", name="cities")
+
+        print(f"проиндексировано {len(documents)} городов в индекс cities_v1")
+    except Exception as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # JSON is printed with Cyrillic as is; the Windows console default (cp1251) garbles it.
@@ -342,6 +390,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_rasp_process(args)
     if args.command == "rasp-air-resilience":
         return run_rasp_air_resilience(args)
+    if args.command == "index-cities":
+        return run_index_cities(args)
     raise AssertionError(f"unhandled command {args.command}")
 
 
