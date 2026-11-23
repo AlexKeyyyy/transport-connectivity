@@ -1,32 +1,68 @@
-"""Full dataset processor and normalizer according to the data contract."""
+"""Normalize the «Если быть точным» CSV into cities and route measurements.
+
+Implements docs/data-contract.md (version 1.0-draft). ``normalize`` is a pure function
+over parsed records; ``process_snapshot`` adds the file boundary: it verifies the input
+against its manifest, writes the outputs to a staging directory and publishes them as a
+whole, so a failed run never leaves a partial result.
+"""
 
 from __future__ import annotations
 
 import csv
+import io
 import json
-import math
-import subprocess
+import re
+import shutil
+import tempfile
 import time
 import tracemalloc
 import uuid
-from collections import Counter
-from dataclasses import asdict, dataclass
+from collections import Counter, defaultdict
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal, Inexact, localcontext
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from transport_connectivity.connector import (
-    EXPECTED_SOURCE_COLUMNS,
-    SNAPSHOT_ID,
-    atomic_write_bytes,
+    DEFAULT_RAW_DIR,
+    MANIFEST_FILENAME,
+    SOURCE_COLUMNS,
+    ConnectorError,
+    load_manifest,
+    sha256_bytes,
     sha256_file,
 )
 
-CONTRACT_VERSION = "1.0.0"
-CONTRACT_NAMESPACE = uuid.UUID("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
+CONTRACT_VERSION = "1.0-draft"
+DEFAULT_OUTPUT_ROOT = Path("data/normalized")
 
-CITIES_COLUMNS = [
+ID_NAMESPACE = "sber_territory"
+# Fixed forever (contract, sections 2 and 3): changing them changes every stored ID.
+NAMESPACE_CITY = uuid.UUID("de98ebe7-8f16-5a7f-b476-6c58b1f92076")
+NAMESPACE_MEASUREMENT = uuid.UUID("3df2f4b5-a23f-5ed3-8ea1-7d25fe8ea191")
+
+TRANSPORT_TYPES = ("road", "rail", "air")
+REJECT_REASONS = (
+    "city_identity_missing",
+    "unknown_transport_type",
+    "self_pair",
+    "missing_without_reason",
+    "partial_measurement",
+    "invalid_number",
+    "exact_duplicate",
+    "key_collision",
+)
+
+CITIES_FILE = "cities.csv"
+MEASUREMENTS_FILE = "route_measurements.csv"
+REJECTED_FILE = "rejected_rows.csv"
+REPORT_FILE = "run-report.json"
+
+CITY_COLUMNS = (
     "city_id",
+    "id_namespace",
     "source_city_id",
     "oktmo",
     "name",
@@ -34,9 +70,8 @@ CITIES_COLUMNS = [
     "latitude",
     "longitude",
     "population",
-]
-
-MEASUREMENTS_COLUMNS = [
+)
+MEASUREMENT_COLUMNS = (
     "measurement_id",
     "snapshot_id",
     "source_row_number",
@@ -48,478 +83,628 @@ MEASUREMENTS_COLUMNS = [
     "missing_reason_raw",
     "source_raw",
     "comment_raw",
-]
+)
+REJECTED_COLUMNS = ("source_row_number", "reject_reason", "detail", "raw_json")
 
-REJECTED_COLUMNS = [
-    "source_row_number",
-    "rejection_reason",
-    "rejection_detail",
-    "city_from",
-    "city_to",
-    "sber_territory_id_from",
-    "sber_territory_id_to",
-    "transport_type",
-    "distance_km",
-    "distance_hr",
-    "missing_reason",
-]
+# Plain decimal notation only: no exponent, sign, comma separator, NaN or Infinity.
+_UNSIGNED_DECIMAL = re.compile(r"[0-9]+(?:\.[0-9]+)?")
+_SIGNED_DECIMAL = re.compile(r"-?[0-9]+(?:\.[0-9]+)?")
+_UNSIGNED_INTEGER = re.compile(r"[0-9]+")
+# snapshot_id becomes a directory name, so it must not contain path separators.
+_SNAPSHOT_ID = re.compile(r"[a-z0-9_]+")
+
+Row = tuple[str | int | None, ...]
+_BOM = "\N{ZERO WIDTH NO-BREAK SPACE}"
+_COLUMN_INDEX = {column: index for index, column in enumerate(SOURCE_COLUMNS)}
 
 
 class ProcessingError(RuntimeError):
-    """Raised when input files are invalid or balance invariants fail."""
+    """The run failed: input does not match its manifest or an invariant broke."""
 
 
-@dataclass(frozen=True)
-class CityRecord:
-    city_id: str
-    source_city_id: str
-    oktmo: str
-    name: str
-    region: str
-    latitude: str
-    longitude: str
-    population: str
+@dataclass(frozen=True, slots=True)
+class SourceRecord:
+    """One CSV record with the physical line number where it starts."""
 
-    def to_row(self) -> dict[str, str]:
-        return asdict(self)
+    row_number: int
+    # Raw values in SOURCE_COLUMNS order; a tuple keeps 96 660 records compact.
+    fields: tuple[str, ...]
 
+    def raw(self, column: str) -> str:
+        return self.fields[_COLUMN_INDEX[column]]
 
-@dataclass(frozen=True)
-class RunReport:
-    snapshot_id: str
-    contract_version: str
-    code_commit: str
-    input_csv_path: str
-    input_csv_sha256: str
-    started_at_utc: str
-    finished_at_utc: str
-    elapsed_seconds: float
-    peak_memory_value: int
-    peak_memory_method: str
-    rows_read: int
-    rows_written: int
-    rows_rejected: int
-    duplicates_removed: int
-    balance_valid: bool
-    balance_formula: str
-    cities_written: int
-    city_attribute_conflicts: int
-    transport_counts: dict[str, int]
-    missing_route_rows_written: int
-    missing_reason_counts: dict[str, int]
-    rejection_reason_counts: dict[str, int]
-    semantic_collisions_count: int
-    output_files_sha256: dict[str, str]
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    def value(self, column: str) -> str:
+        return self.raw(column).strip()
 
 
-def get_git_commit() -> str:
-    """Return current short git commit SHA or 'unknown' if unavailable."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short=12", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
+class Problem(NamedTuple):
+    reason: str
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class Measurement:
+    source_row_number: int
+    from_city_id: str
+    to_city_id: str
+    transport_type: str
+    distance_m: str | None
+    duration_sec: str | None
+    missing_reason_raw: str | None
+    source_raw: str | None
+    comment_raw: str | None
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        return self.from_city_id, self.to_city_id, self.transport_type
+
+    @property
+    def values(self) -> tuple[str | None, str | None, str | None]:
+        """Measured values; source and comment only explain them (contract, section 5)."""
+        return self.distance_m, self.duration_sec, self.missing_reason_raw
+
+    def to_row(self, snapshot_id: str) -> Row:
+        return (
+            measurement_id(snapshot_id, self.from_city_id, self.to_city_id, self.transport_type),
+            snapshot_id,
+            self.source_row_number,
+            self.from_city_id,
+            self.to_city_id,
+            self.transport_type,
+            self.distance_m,
+            self.duration_sec,
+            self.missing_reason_raw,
+            self.source_raw,
+            self.comment_raw,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except OSError:
-        pass
-    return "unknown"
 
 
-def make_city_ids(sber_id_raw: str, oktmo_raw: str) -> tuple[str, str] | None:
-    """Build deterministic (city_id, source_city_id) preserving string representation."""
-    sber = sber_id_raw.strip()
-    oktmo = oktmo_raw.strip()
-    if sber:
-        source_city_id = f"sber:{sber}"
-    elif oktmo:
-        source_city_id = f"oktmo:{oktmo}"
-    else:
-        return None
-    deterministic_uuid = uuid.uuid5(
-        CONTRACT_NAMESPACE, f"transport-connectivity.city/{source_city_id}"
-    )
-    return f"city-{deterministic_uuid}", source_city_id
+@dataclass
+class _CityEvidence:
+    """Every occurrence of one Sber ID at either end of any input record."""
+
+    oktmo: set[str] = field(default_factory=set)
+    name: Counter[str] = field(default_factory=Counter)
+    region: Counter[str] = field(default_factory=Counter)
+    population: Counter[int] = field(default_factory=Counter)
+    coordinates: Counter[tuple[Decimal, Decimal]] = field(default_factory=Counter)
 
 
-def make_measurement_id(
+@dataclass(frozen=True)
+class NormalizationResult:
+    city_rows: list[Row]
+    measurement_rows: list[Row]
+    rejected_rows: list[Row]
+    report: dict[str, Any]
+
+
+# --- identifiers and values -------------------------------------------------------------
+
+
+def city_id(source_city_id: str) -> str:
+    return str(uuid.uuid5(NAMESPACE_CITY, f"{ID_NAMESPACE}:{source_city_id}"))
+
+
+def measurement_id(
     snapshot_id: str, from_city_id: str, to_city_id: str, transport_type: str
 ) -> str:
-    key = (
-        f"transport-connectivity.measurement/{snapshot_id}/"
-        f"{from_city_id}/{to_city_id}/{transport_type}"
-    )
-    return f"meas-{uuid.uuid5(CONTRACT_NAMESPACE, key)}"
+    name = f"{snapshot_id}|{from_city_id}|{to_city_id}|{transport_type}"
+    return str(uuid.uuid5(NAMESPACE_MEASUREMENT, name))
 
 
-def parse_coordinate(lat_raw: str, lon_raw: str) -> tuple[str, str] | None:
+def format_decimal(value: Decimal) -> str:
+    """Write a decimal without exponent and trailing zeros: 694000.0 -> 694000."""
+    if value == 0:
+        return "0"
+    with localcontext() as context:
+        # normalize() rounds to the context precision; keep every digit of the value.
+        context.prec = len(value.as_tuple().digits)
+        return format(value.normalize(), "f")
+
+
+def scale_exactly(value: Decimal, factor: int) -> Decimal:
+    """Multiply without the default 28-digit context rounding long inputs."""
+    with localcontext() as context:
+        context.prec = len(value.as_tuple().digits) + len(str(factor))
+        context.traps[Inexact] = True
+        return value * factor
+
+
+def parse_positive(text: str) -> Decimal | None:
+    if not _UNSIGNED_DECIMAL.fullmatch(text):
+        return None
+    value = Decimal(text)
+    return value if value > 0 else None
+
+
+def _parse_coordinates(lat: str, lon: str) -> tuple[Decimal, Decimal] | None:
+    if not (_SIGNED_DECIMAL.fullmatch(lat) and _SIGNED_DECIMAL.fullmatch(lon)):
+        return None
+    latitude, longitude = Decimal(lat), Decimal(lon)
+    if -90 <= latitude <= 90 and -180 <= longitude <= 180:
+        return latitude, longitude
+    return None
+
+
+def _majority[T](votes: Counter[T]) -> T | None:
+    """Value with strictly more than half of the votes, otherwise None."""
+    total = sum(votes.values())
+    if not total:
+        return None
+    value, count = votes.most_common(1)[0]
+    return value if count * 2 > total else None
+
+
+# --- reading ---------------------------------------------------------------------------
+
+
+def read_records(path: Path) -> tuple[list[SourceRecord], bool]:
+    """Read all records as strings; return them and whether the file starts with a BOM."""
     try:
-        lat = float(lat_raw.strip())
-        lon = float(lon_raw.strip())
-    except ValueError:
-        return None
-    if not (math.isfinite(lat) and math.isfinite(lon)):
-        return None
-    if not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
-        return None
-    return f"{lat:.7f}".rstrip("0").rstrip("."), f"{lon:.7f}".rstrip("0").rstrip(".")
+        with path.open(encoding="utf-8", newline="") as handle:
+            reader = csv.reader(handle, delimiter=";")
+            header = next(reader, [])
+            has_bom = bool(header) and header[0].startswith(_BOM)
+            if has_bom:
+                header[0] = header[0].removeprefix(_BOM)
+            if tuple(header) != SOURCE_COLUMNS:
+                raise ProcessingError(f"Unexpected CSV header: {header}")
+
+            records: list[SourceRecord] = []
+            start_line = reader.line_num + 1
+            for values in reader:
+                if len(values) != len(SOURCE_COLUMNS):
+                    raise ProcessingError(
+                        f"Record at line {start_line} has {len(values)} fields, "
+                        f"expected {len(SOURCE_COLUMNS)}"
+                    )
+                records.append(SourceRecord(start_line, tuple(values)))
+                start_line = reader.line_num + 1
+    except UnicodeDecodeError as error:
+        raise ProcessingError(f"Input is not valid UTF-8: {error}") from error
+    except csv.Error as error:
+        raise ProcessingError(f"Input is not valid CSV: {error}") from error
+    return records, has_bom
 
 
-def parse_population(pop_raw: str) -> str | None:
-    val = pop_raw.strip()
-    if not val:
-        return ""
-    if not val.isdigit():
-        return None
-    pop_int = int(val)
-    if pop_int <= 0:
-        return None
-    return str(pop_int)
+# --- row-level validation (contract, section 4) -----------------------------------------
 
 
-def format_metric(value: float) -> str:
-    rounded = round(value, 3)
-    if rounded.is_integer():
-        return f"{int(rounded)}.0"
-    return f"{rounded:.3f}".rstrip("0").rstrip(".")
+def _measurement_problems(record: SourceRecord) -> tuple[list[Problem], str | None, str | None]:
+    distance_km = record.value("distance_km")
+    distance_hr = record.value("distance_hr")
+    if not distance_km and not distance_hr:
+        if record.value("missing_reason"):
+            return [], None, None
+        return [Problem("missing_without_reason", "missing_reason=")], None, None
+    if not distance_km or not distance_hr:
+        empty = "distance_km" if not distance_km else "distance_hr"
+        return [Problem("partial_measurement", f"{empty}=")], None, None
+
+    km, hours = parse_positive(distance_km), parse_positive(distance_hr)
+    problems = [
+        Problem("invalid_number", f"{column}={text}")
+        for column, text, value in (
+            ("distance_km", distance_km, km),
+            ("distance_hr", distance_hr, hours),
+        )
+        if value is None
+    ]
+    if km is None or hours is None:
+        return problems, None, None
+    return [], format_decimal(scale_exactly(km, 1000)), format_decimal(scale_exactly(hours, 3600))
 
 
-def parse_positive_finite(raw: str) -> float | None:
-    try:
-        value = float(raw.strip())
-    except ValueError:
-        return None
-    if not math.isfinite(value) or value <= 0.0:
-        return None
-    return value
+def validate_record(record: SourceRecord) -> Measurement | Problem:
+    """Return the measurement or the first problem, with all problems in its detail.
 
+    Checks are listed in contract priority order, so the first one found is the reason.
+    """
+    problems: list[Problem] = []
+    sber_from = record.value("sber_territory_id_from")
+    sber_to = record.value("sber_territory_id_to")
+    for column, value in (("sber_territory_id_from", sber_from), ("sber_territory_id_to", sber_to)):
+        if not value:
+            problems.append(Problem("city_identity_missing", f"{column}="))
 
-def serialize_csv_bytes(columns: list[str], rows: list[dict[str, Any]]) -> bytes:
-    import io
+    transport = record.value("transport_type")
+    if transport not in TRANSPORT_TYPES:
+        problems.append(Problem("unknown_transport_type", f"transport_type={transport}"))
+    if sber_from and sber_from == sber_to:
+        problems.append(Problem("self_pair", f"sber_territory_id_to={sber_to}"))
 
-    buf = io.StringIO()
-    writer = csv.DictWriter(
-        buf, fieldnames=columns, delimiter=",", extrasaction="ignore", lineterminator="\n"
+    numeric_problems, distance_m, duration_sec = _measurement_problems(record)
+    problems.extend(numeric_problems)
+    if problems:
+        return Problem(problems[0].reason, "; ".join(problem.detail for problem in problems))
+
+    return Measurement(
+        source_row_number=record.row_number,
+        from_city_id=city_id(sber_from),
+        to_city_id=city_id(sber_to),
+        transport_type=transport,
+        distance_m=distance_m,
+        duration_sec=duration_sec,
+        missing_reason_raw=record.value("missing_reason") or None,
+        source_raw=record.value("source") or None,
+        comment_raw=record.value("comment") or None,
     )
-    writer.writeheader()
-    writer.writerows(rows)
-    return buf.getvalue().encode("utf-8")
 
 
-def process_dataset(
-    input_csv_path: Path,
-    output_dir: Path,
-    *,
-    manifest_path: Path | None = None,
-) -> RunReport:
-    """Normalize the full connectivity CSV into cities, route_measurements, and run_report."""
-    if not input_csv_path.is_file():
-        raise ProcessingError(f"Input CSV file does not exist: {input_csv_path}")
+# --- repeated keys (contract, section 5) -------------------------------------------------
 
-    snapshot_id = SNAPSHOT_ID
-    input_sha256 = sha256_file(input_csv_path)
 
-    if manifest_path is not None:
-        if not manifest_path.is_file():
-            raise ProcessingError(f"Manifest file does not exist: {manifest_path}")
-        try:
-            manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as error:
-            raise ProcessingError(f"Invalid manifest JSON: {error}") from error
-        expected_sha = manifest_data.get("csv_sha256")
-        if expected_sha and expected_sha != input_sha256:
-            raise ProcessingError(
-                f"Input CSV SHA-256 ({input_sha256}) does not match manifest ({expected_sha})"
+def resolve_repeats(
+    measurements: Sequence[Measurement],
+) -> tuple[list[Measurement], dict[int, Problem], list[dict[str, Any]]]:
+    """Keep one row per key; return kept rows, rejections by row and source differences."""
+    groups: dict[tuple[str, str, str], list[Measurement]] = defaultdict(list)
+    for measurement in sorted(measurements, key=lambda item: item.source_row_number):
+        groups[measurement.key].append(measurement)
+
+    kept: list[Measurement] = []
+    rejected: dict[int, Problem] = {}
+    source_differences: list[dict[str, Any]] = []
+    for group in groups.values():
+        first, *repeats = group
+        if len({item.values for item in group}) > 1:
+            rows = ",".join(str(item.source_row_number) for item in group)
+            for item in group:
+                rejected[item.source_row_number] = Problem(
+                    "key_collision", f"source_row_numbers={rows}"
+                )
+            continue
+
+        kept.append(first)
+        for item in repeats:
+            rejected[item.source_row_number] = Problem(
+                "exact_duplicate", f"kept_source_row_number={first.source_row_number}"
             )
-        if isinstance(manifest_data.get("snapshot_id"), str):
-            snapshot_id = manifest_data["snapshot_id"]
+        if len({(item.source_raw, item.comment_raw) for item in group}) > 1:
+            source_differences.append(
+                {
+                    "from_city_id": first.from_city_id,
+                    "to_city_id": first.to_city_id,
+                    "transport_type": first.transport_type,
+                    "rows": [
+                        {
+                            "source_row_number": item.source_row_number,
+                            "source_raw": item.source_raw,
+                            "comment_raw": item.comment_raw,
+                        }
+                        for item in group
+                    ],
+                }
+            )
+    return kept, rejected, source_differences
 
-    started_at_utc = datetime.now(UTC).isoformat(timespec="seconds")
-    tracemalloc.start()
-    t0 = time.perf_counter()
 
+# --- cities (contract, section 2) ---------------------------------------------------------
+
+
+def _collect_city_evidence(
+    records: Iterable[SourceRecord],
+) -> tuple[dict[str, _CityEvidence], Counter[tuple[str, str, str]], dict[str, int]]:
+    evidence: dict[str, _CityEvidence] = defaultdict(_CityEvidence)
+    invalid: Counter[tuple[str, str, str]] = Counter()
+    endpoints = {"total": 0, "sber_id_missing": 0, "oktmo_missing": 0, "identifiers_trimmed": 0}
+
+    for record in records:
+        for end in ("from", "to"):
+            raw_sber = record.raw(f"sber_territory_id_{end}")
+            raw_oktmo = record.raw(f"oktmo_{end}")
+            sber, oktmo = raw_sber.strip(), raw_oktmo.strip()
+            endpoints["total"] += 1
+            endpoints["sber_id_missing"] += not sber
+            endpoints["oktmo_missing"] += not oktmo
+            endpoints["identifiers_trimmed"] += (raw_sber != sber) + (raw_oktmo != oktmo)
+            if not sber:
+                continue
+
+            city = evidence[sber]
+            if oktmo:
+                city.oktmo.add(oktmo)
+            if name := record.value(f"city_{end}"):
+                city.name[name] += 1
+            if region := record.value(f"region_{end}"):
+                city.region[region] += 1
+
+            population = record.value(f"population_{end}")
+            if _UNSIGNED_INTEGER.fullmatch(population):
+                city.population[int(population)] += 1
+            elif population:
+                invalid[(sber, "population", population)] += 1
+
+            lat, lon = record.value(f"lat_{end}"), record.value(f"lon_{end}")
+            if coordinates := _parse_coordinates(lat, lon):
+                city.coordinates[coordinates] += 1
+            else:
+                # Missing coordinates are reported too (contract, section 2).
+                invalid[(sber, "coordinates", f"{lat},{lon}")] += 1
+    return evidence, invalid, endpoints
+
+
+def _oktmo_conflicts(evidence: dict[str, _CityEvidence]) -> tuple[set[str], dict[str, Any]]:
+    """Sber IDs whose OKTMO is ambiguous in either direction of the mapping."""
+    sber_by_oktmo: dict[str, set[str]] = defaultdict(set)
+    for sber, city in evidence.items():
+        for oktmo in city.oktmo:
+            sber_by_oktmo[oktmo].add(sber)
+
+    several_oktmo = {sber: city.oktmo for sber, city in evidence.items() if len(city.oktmo) > 1}
+    several_sber = {oktmo: ids for oktmo, ids in sber_by_oktmo.items() if len(ids) > 1}
+    affected = set(several_oktmo).union(*several_sber.values())
+    report = {
+        "sber_id_with_several_oktmo": [
+            {"source_city_id": sber, "oktmo": sorted(values)}
+            for sber, values in sorted(several_oktmo.items())
+        ],
+        "oktmo_with_several_sber_id": [
+            {"oktmo": oktmo, "source_city_ids": sorted(ids)}
+            for oktmo, ids in sorted(several_sber.items())
+        ],
+    }
+    return affected, report
+
+
+def _vote_text(value: object) -> str:
+    if isinstance(value, tuple):
+        return ",".join(format_decimal(part) for part in value)
+    return str(value)
+
+
+def resolve_cities(records: Sequence[SourceRecord]) -> tuple[list[Row], dict[str, Any]]:
+    """Build one city per Sber ID by majority over all occurrences; report the evidence."""
+    evidence, invalid, endpoints = _collect_city_evidence(records)
+    oktmo_ambiguous, oktmo_report = _oktmo_conflicts(evidence)
+
+    rows: list[Row] = []
+    attribute_conflicts: list[dict[str, Any]] = []
+    for sber in sorted(evidence):
+        city = evidence[sber]
+        chosen: dict[str, Any] = {}
+        for attribute in ("name", "region", "population", "coordinates"):
+            votes: Counter[Any] = getattr(city, attribute)
+            winner = chosen[attribute] = _majority(votes)
+            if len(votes) > 1:
+                attribute_conflicts.append(
+                    {
+                        "source_city_id": sber,
+                        "attribute": attribute,
+                        "values": {_vote_text(value): n for value, n in sorted(votes.items())},
+                        "chosen": None if winner is None else _vote_text(winner),
+                    }
+                )
+        unambiguous = sber not in oktmo_ambiguous and len(city.oktmo) == 1
+        coordinates = chosen["coordinates"] or (None, None)
+        rows.append(
+            (
+                city_id(sber),
+                ID_NAMESPACE,
+                sber,
+                next(iter(city.oktmo)) if unambiguous else None,
+                chosen["name"],
+                chosen["region"],
+                *(None if part is None else format_decimal(part) for part in coordinates),
+                chosen["population"],
+            )
+        )
+
+    oktmo_column = CITY_COLUMNS.index("oktmo")
+    identity = {
+        "endpoints": endpoints,
+        "cities": {
+            "total": len(rows),
+            "oktmo_missing": sum(row[oktmo_column] is None for row in rows),
+        },
+        "cities_by_namespace": {ID_NAMESPACE: len(rows)},
+        "oktmo_conflicts": oktmo_report,
+        "attribute_conflicts": attribute_conflicts,
+        "invalid_attributes": [
+            {"source_city_id": sber, "attribute": attribute, "value": value, "count": count}
+            for (sber, attribute, value), count in sorted(invalid.items())
+        ],
+    }
+    return rows, identity
+
+
+# --- whole snapshot ----------------------------------------------------------------------
+
+
+def _rejected_row(record: SourceRecord, problem: Problem) -> Row:
+    raw_json = json.dumps(
+        dict(zip(SOURCE_COLUMNS, record.fields, strict=True)),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return record.row_number, problem.reason, problem.detail, raw_json
+
+
+def _sorted_counts(values: Iterable[str]) -> dict[str, int]:
+    return dict(sorted(Counter(values).items()))
+
+
+def normalize(records: Sequence[SourceRecord], snapshot_id: str) -> NormalizationResult:
+    """Apply the contract to parsed records; every record ends up in exactly one output."""
+    records_by_row = {record.row_number: record for record in records}
+    valid: list[Measurement] = []
+    rejected: dict[int, Problem] = {}
+    for record in records:
+        outcome = validate_record(record)
+        if isinstance(outcome, Measurement):
+            valid.append(outcome)
+        else:
+            rejected[record.row_number] = outcome
+
+    kept, repeat_rejections, source_differences = resolve_repeats(valid)
+    rejected.update(repeat_rejections)
+    kept.sort(key=lambda item: item.source_row_number)
+    city_rows, identity = resolve_cities(records)
+
+    rejection_counts = Counter(problem.reason for problem in rejected.values())
+    report = {
+        "rejections": {reason: rejection_counts[reason] for reason in REJECT_REASONS},
+        "missing_reason_values": _sorted_counts(
+            record.value("missing_reason") for record in records
+        ),
+        "measurements": {
+            "with_values": sum(item.distance_m is not None for item in kept),
+            "without_values": sum(item.distance_m is None for item in kept),
+            "by_transport_type": _sorted_counts(item.transport_type for item in kept),
+        },
+        "duplicates": {
+            "exact_duplicate": rejection_counts["exact_duplicate"],
+            "key_collision": rejection_counts["key_collision"],
+            "source_differences": source_differences,
+        },
+        "identity": identity,
+    }
+    return NormalizationResult(
+        city_rows=city_rows,
+        measurement_rows=[item.to_row(snapshot_id) for item in kept],
+        rejected_rows=[
+            _rejected_row(records_by_row[row], problem) for row, problem in sorted(rejected.items())
+        ],
+        report=report,
+    )
+
+
+def to_csv_bytes(columns: Sequence[str], rows: Iterable[Row]) -> bytes:
+    """Contract output format: comma, ``\\n``, minimal quoting, NULL as an empty field."""
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, lineterminator="\n")
+    writer.writerow(columns)
+    writer.writerows(rows)
+    return buffer.getvalue().encode("utf-8")
+
+
+def publish_directory(target: Path, files: dict[str, bytes]) -> None:
+    """Write files to a staging directory and swap it with ``target`` in one step."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp"))
     try:
-        with input_csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
-            reader = csv.DictReader(handle, delimiter=";")
-            columns = list(reader.fieldnames or [])
-            missing_cols = [col for col in EXPECTED_SOURCE_COLUMNS if col not in columns]
-            if missing_cols:
-                raise ProcessingError(
-                    f"Input CSV is missing required columns: {', '.join(missing_cols)}"
-                )
+        for name, data in files.items():
+            (staging / name).write_bytes(data)
+        previous = target.with_name(f".{target.name}.previous")
+        if previous.exists():
+            # Left by a run killed mid-swap: it is the last good copy if target is gone.
+            if target.exists():
+                shutil.rmtree(previous)
+            else:
+                previous.rename(target)
+        if target.exists():
+            target.rename(previous)
+        try:
+            staging.rename(target)
+        except OSError:
+            if previous.exists():
+                previous.rename(target)
+            raise
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    shutil.rmtree(previous, ignore_errors=True)
 
-            cities_by_id: dict[str, CityRecord] = {}
-            city_conflicts = 0
-            measurements_written: list[dict[str, Any]] = []
-            rejected_rows: list[dict[str, Any]] = []
-            seen_keys: dict[tuple[str, str, str], tuple[str, str]] = {}
 
-            rows_read = 0
-            duplicates_removed = 0
-            semantic_collisions = 0
-            missing_route_rows_written = 0
-            transport_counts: Counter[str] = Counter()
-            missing_reason_counts: Counter[str] = Counter()
-            rejection_reason_counts: Counter[str] = Counter()
+def _display_path(path: Path) -> str:
+    """Path relative to the working directory; never an absolute developer path."""
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return path.name
 
-            def reject(row_num: int, row: dict[str, str], reason: str, detail: str) -> None:
-                rejection_reason_counts[reason] += 1
-                rejected_rows.append(
-                    {
-                        "source_row_number": row_num,
-                        "rejection_reason": reason,
-                        "rejection_detail": detail,
-                        "city_from": (row.get("city_from") or "").strip(),
-                        "city_to": (row.get("city_to") or "").strip(),
-                        "sber_territory_id_from": (row.get("sber_territory_id_from") or "").strip(),
-                        "sber_territory_id_to": (row.get("sber_territory_id_to") or "").strip(),
-                        "transport_type": (row.get("transport_type") or "").strip(),
-                        "distance_km": (row.get("distance_km") or "").strip(),
-                        "distance_hr": (row.get("distance_hr") or "").strip(),
-                        "missing_reason": (row.get("missing_reason") or "").strip(),
-                    }
-                )
 
-            for row_num, row in enumerate(reader, start=1):
-                rows_read += 1
-                if None in row or any(v is None for k, v in row.items() if k is not None):
-                    reject(row_num, row, "malformed_csv_row", "Column count mismatch in row")
-                    continue
+def process_snapshot(
+    raw_dir: Path = DEFAULT_RAW_DIR,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    *,
+    code_version: str = "unknown",
+) -> dict[str, Any]:
+    """Normalize the snapshot in ``raw_dir`` into ``output_root/<snapshot_id>/``.
 
-                ids_from = make_city_ids(
-                    row.get("sber_territory_id_from", ""), row.get("oktmo_from", "")
-                )
-                ids_to = make_city_ids(row.get("sber_territory_id_to", ""), row.get("oktmo_to", ""))
-                if ids_from is None or ids_to is None:
-                    reject(row_num, row, "missing_city_id", "Missing sber_territory_id and oktmo")
-                    continue
+    Raises ProcessingError (status ``failed``) before publishing anything when the input
+    does not match its manifest or the row balance does not hold.
+    """
+    started_at = datetime.now(UTC)
+    started = time.perf_counter()
+    tracemalloc.start()
+    try:
+        try:
+            manifest = load_manifest(raw_dir / MANIFEST_FILENAME)
+        except ConnectorError as error:
+            raise ProcessingError(str(error)) from error
+        csv_path = raw_dir / manifest.csv_filename
+        if not csv_path.is_file():
+            raise ProcessingError(f"Input CSV not found: {_display_path(csv_path)}")
+        input_sha256 = sha256_file(csv_path)
+        if input_sha256 != manifest.csv_sha256:
+            raise ProcessingError(
+                f"Input SHA-256 {input_sha256} does not match manifest {manifest.csv_sha256}"
+            )
+        records, has_bom = read_records(csv_path)
+        if len(records) != manifest.row_count:
+            raise ProcessingError(
+                f"Input has {len(records)} records, manifest says {manifest.row_count}"
+            )
 
-                from_city_id, from_source_id = ids_from
-                to_city_id, to_source_id = ids_to
-                if from_city_id == to_city_id:
-                    reject(row_num, row, "self_loop", "from_city_id equals to_city_id")
-                    continue
+        if not _SNAPSHOT_ID.fullmatch(manifest.snapshot_id):
+            raise ProcessingError(f"Invalid snapshot_id in manifest: {manifest.snapshot_id!r}")
+        result = normalize(records, manifest.snapshot_id)
+        rows_out = len(result.measurement_rows) + len(result.rejected_rows)
+        if rows_out != len(records):
+            raise ProcessingError(f"Balance broken: {len(records)} read, {rows_out} written")
 
-                name_from = row.get("city_from", "").strip()
-                name_to = row.get("city_to", "").strip()
-                if not name_from or not name_to:
-                    reject(row_num, row, "missing_city_name", "Empty city_from or city_to")
-                    continue
-
-                coords_from = parse_coordinate(row.get("lat_from", ""), row.get("lon_from", ""))
-                coords_to = parse_coordinate(row.get("lat_to", ""), row.get("lon_to", ""))
-                if coords_from is None or coords_to is None:
-                    reject(
-                        row_num,
-                        row,
-                        "invalid_coordinates",
-                        "Coordinates are non-numeric, non-finite, or out of WGS84 bounds",
-                    )
-                    continue
-
-                pop_from = parse_population(row.get("population_from", ""))
-                pop_to = parse_population(row.get("population_to", ""))
-                if pop_from is None or pop_to is None:
-                    reject(row_num, row, "invalid_population", "Population is not a positive int")
-                    continue
-
-                transport = row.get("transport_type", "").strip()
-                if not transport:
-                    reject(row_num, row, "missing_transport_type", "Empty transport_type")
-                    continue
-
-                dist_raw = row.get("distance_km", "").strip()
-                dur_raw = row.get("distance_hr", "").strip()
-                missing_reason_raw = row.get("missing_reason", "").strip()
-                source_raw = row.get("source", "").strip()
-                comment_raw = row.get("comment", "").strip()
-
-                if not dist_raw and not dur_raw:
-                    # Legitimate missing route only when a reason other than empty/CD is given
-                    if not missing_reason_raw or missing_reason_raw == "CD":
-                        reject(
-                            row_num,
-                            row,
-                            "unexplained_missing_metrics",
-                            "Both distance_km and distance_hr are empty without missing_reason",
-                        )
-                        continue
-                    distance_m_str = ""
-                    duration_sec_str = ""
-                elif not dist_raw or not dur_raw:
-                    reject(
-                        row_num,
-                        row,
-                        "partial_metrics",
-                        "Only one of distance_km or distance_hr is populated",
-                    )
-                    continue
-                else:
-                    dist_km = parse_positive_finite(dist_raw)
-                    dur_hr = parse_positive_finite(dur_raw)
-                    if dist_km is None or dur_hr is None:
-                        reject(
-                            row_num,
-                            row,
-                            "invalid_metric_value",
-                            "distance_km or distance_hr is non-numeric, non-finite, or <= 0",
-                        )
-                        continue
-                    distance_m_str = format_metric(dist_km * 1000.0)
-                    duration_sec_str = format_metric(dur_hr * 3600.0)
-
-                city_from_rec = CityRecord(
-                    city_id=from_city_id,
-                    source_city_id=from_source_id,
-                    oktmo=row.get("oktmo_from", "").strip(),
-                    name=name_from,
-                    region=row.get("region_from", "").strip(),
-                    latitude=coords_from[0],
-                    longitude=coords_from[1],
-                    population=pop_from,
-                )
-                city_to_rec = CityRecord(
-                    city_id=to_city_id,
-                    source_city_id=to_source_id,
-                    oktmo=row.get("oktmo_to", "").strip(),
-                    name=name_to,
-                    region=row.get("region_to", "").strip(),
-                    latitude=coords_to[0],
-                    longitude=coords_to[1],
-                    population=pop_to,
-                )
-
-                city_conflict_detected = False
-                for candidate in (city_from_rec, city_to_rec):
-                    existing = cities_by_id.get(candidate.city_id)
-                    if existing is not None and existing != candidate:
-                        city_conflicts += 1
-                        city_conflict_detected = True
-                        break
-                if city_conflict_detected:
-                    reject(
-                        row_num,
-                        row,
-                        "city_attribute_conflict",
-                        "Conflicting city attributes for the same source_city_id",
-                    )
-                    continue
-
-                obs_key = (from_city_id, to_city_id, transport)
-                obs_metrics = (distance_m_str, duration_sec_str)
-                if obs_key in seen_keys:
-                    if seen_keys[obs_key] == obs_metrics:
-                        duplicates_removed += 1
-                        continue
-                    semantic_collisions += 1
-                    reject(
-                        row_num,
-                        row,
-                        "semantic_collision",
-                        "Conflicting metrics for identical route and transport",
-                    )
-                    continue
-
-                seen_keys[obs_key] = obs_metrics
-                cities_by_id.setdefault(city_from_rec.city_id, city_from_rec)
-                cities_by_id.setdefault(city_to_rec.city_id, city_to_rec)
-
-                if not distance_m_str:
-                    missing_route_rows_written += 1
-                transport_counts[transport] += 1
-                missing_reason_counts[missing_reason_raw or "<empty>"] += 1
-
-                measurements_written.append(
-                    {
-                        "measurement_id": make_measurement_id(
-                            snapshot_id, from_city_id, to_city_id, transport
-                        ),
-                        "snapshot_id": snapshot_id,
-                        "source_row_number": row_num,
-                        "from_city_id": from_city_id,
-                        "to_city_id": to_city_id,
-                        "transport_type": transport,
-                        "distance_m": distance_m_str,
-                        "duration_sec": duration_sec_str,
-                        "missing_reason_raw": missing_reason_raw,
-                        "source_raw": source_raw,
-                        "comment_raw": comment_raw,
-                    }
-                )
-
-        elapsed_seconds = round(time.perf_counter() - t0, 6)
-        _, peak_memory_bytes = tracemalloc.get_traced_memory()
+        outputs = {
+            CITIES_FILE: to_csv_bytes(CITY_COLUMNS, result.city_rows),
+            MEASUREMENTS_FILE: to_csv_bytes(MEASUREMENT_COLUMNS, result.measurement_rows),
+            REJECTED_FILE: to_csv_bytes(REJECTED_COLUMNS, result.rejected_rows),
+        }
+        _, peak_memory = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
 
-    rows_written = len(measurements_written)
-    rows_rejected = len(rejected_rows)
-    balance_valid = rows_read == (rows_written + rows_rejected + duplicates_removed)
-    if not balance_valid:
-        raise ProcessingError(
-            f"Row balance violation: rows_read={rows_read} != "
-            f"rows_written={rows_written} + rows_rejected={rows_rejected} + "
-            f"duplicates_removed={duplicates_removed}"
-        )
-
-    sorted_cities = [cities_by_id[cid].to_row() for cid in sorted(cities_by_id.keys())]
-    measurements_written.sort(key=lambda item: int(item["source_row_number"]))
-    rejected_rows.sort(key=lambda item: int(item["source_row_number"]))
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    cities_path = output_dir / "cities.csv"
-    measurements_path = output_dir / "route_measurements.csv"
-    rejected_path = output_dir / "rejected_rows.csv"
-    report_path = output_dir / "run_report.json"
-
-    atomic_write_bytes(cities_path, serialize_csv_bytes(CITIES_COLUMNS, sorted_cities))
-    atomic_write_bytes(
-        measurements_path, serialize_csv_bytes(MEASUREMENTS_COLUMNS, measurements_written)
-    )
-    atomic_write_bytes(rejected_path, serialize_csv_bytes(REJECTED_COLUMNS, rejected_rows))
-
-    output_hashes = {
-        "cities.csv": sha256_file(cities_path),
-        "route_measurements.csv": sha256_file(measurements_path),
-        "rejected_rows.csv": sha256_file(rejected_path),
+    output_dir = output_root / manifest.snapshot_id
+    row_counts = {
+        CITIES_FILE: len(result.city_rows),
+        MEASUREMENTS_FILE: len(result.measurement_rows),
+        REJECTED_FILE: len(result.rejected_rows),
     }
-
-    finished_at_utc = datetime.now(UTC).isoformat(timespec="seconds")
-    report = RunReport(
-        snapshot_id=snapshot_id,
-        contract_version=CONTRACT_VERSION,
-        code_commit=get_git_commit(),
-        input_csv_path=input_csv_path.as_posix(),
-        input_csv_sha256=input_sha256,
-        started_at_utc=started_at_utc,
-        finished_at_utc=finished_at_utc,
-        elapsed_seconds=elapsed_seconds,
-        peak_memory_value=peak_memory_bytes,
-        peak_memory_method="python_tracemalloc_bytes",
-        rows_read=rows_read,
-        rows_written=rows_written,
-        rows_rejected=rows_rejected,
-        duplicates_removed=duplicates_removed,
-        balance_valid=balance_valid,
-        balance_formula="rows_read == rows_written + rows_rejected + duplicates_removed",
-        cities_written=len(sorted_cities),
-        city_attribute_conflicts=city_conflicts,
-        transport_counts=dict(sorted(transport_counts.items())),
-        missing_route_rows_written=missing_route_rows_written,
-        missing_reason_counts=dict(sorted(missing_reason_counts.items())),
-        rejection_reason_counts=dict(sorted(rejection_reason_counts.items())),
-        semantic_collisions_count=semantic_collisions,
-        output_files_sha256=output_hashes,
-    )
-
-    atomic_write_bytes(
-        report_path,
-        (json.dumps(report.to_dict(), ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
-    )
+    report = {
+        "contract_version": CONTRACT_VERSION,
+        "snapshot_id": manifest.snapshot_id,
+        "status": "success_with_rejections" if result.rejected_rows else "success",
+        "input": {
+            "path": _display_path(csv_path),
+            "sha256": input_sha256,
+            "size_bytes": csv_path.stat().st_size,
+            "records": len(records),
+            "bom": has_bom,
+            "header_matches_contract": True,
+            "manifest_matches": True,
+        },
+        "output": {
+            name: {"rows": row_counts[name], "sha256": sha256_bytes(data)}
+            for name, data in outputs.items()
+        },
+        "balance": {
+            "rows_read": len(records),
+            "route_measurements": len(result.measurement_rows),
+            "rejected_rows": len(result.rejected_rows),
+        },
+        **result.report,
+        "service": {
+            "started_at_utc": started_at.isoformat(timespec="seconds"),
+            "finished_at_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+            "duration_sec": round(time.perf_counter() - started, 3),
+            "peak_memory_bytes": peak_memory,
+            "peak_memory_method": "tracemalloc: Python allocations from manifest to CSV bytes",
+            "code_version": code_version,
+            "parameters": {
+                "raw_dir": _display_path(raw_dir),
+                "output_dir": _display_path(output_dir),
+            },
+        },
+    }
+    report_bytes = (json.dumps(report, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+    publish_directory(output_dir, {**outputs, REPORT_FILE: report_bytes})
     return report

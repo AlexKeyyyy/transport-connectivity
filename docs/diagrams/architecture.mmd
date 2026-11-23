@@ -1,0 +1,52 @@
+---
+title: Архитектура и потоки данных transport-connectivity
+---
+flowchart LR
+    subgraph src["Внешние источники"]
+        T["«Если быть точным»<br/>CSV связности"]
+        OSM["OpenStreetMap<br/>Overpass / PBF"]
+        Y["Яндекс Расписания<br/>API"]
+    end
+
+    subgraph raw["Исходный слой: data/raw, вне Git"]
+        F["Снимки файлов<br/>+ manifest, SHA-256"]
+        OSRM["OSRM<br/>маршрутизация по снимку OSM"]
+    end
+
+    subgraph norm["Нормализация"]
+        N["Проверка и приведение:<br/>ID, единицы, пропуски, повторы"]
+        REJ["Отклонённые строки<br/>и отчёт запуска"]
+    end
+
+    subgraph pg["PostgreSQL + PostGIS — источник истины"]
+        L1[("Исходный слой<br/>data_snapshot, load_run")]
+        L2[("Нормализованный слой<br/>city, route_measurement,<br/>road_segment, station")]
+        L3[("Аналитический слой<br/>graph_snapshot, graph_edge,<br/>analysis_run, metric_result")]
+    end
+
+    subgraph derived["Производные представления — пересобираются из PostgreSQL"]
+        NEO[("Neo4j<br/>граф одной версии")]
+        ES[("Elasticsearch<br/>индекс cities")]
+    end
+
+    T --> F
+    OSM --> F
+    Y --> F
+    OSM --> OSRM
+    OSRM -->|"измерения маршрутов"| F
+    F --> N
+    N --> REJ
+    N --> L2
+    F -.->|"метаданные снимка"| L1
+    REJ --> L1
+    L2 -->|"построение графа по методике"| L3
+    L3 -->|"выгрузка версии"| NEO
+    NEO -->|"результаты расчётов"| L3
+    L2 -->|"выгрузка городов"| ES
+
+    CLI{{"CLI запускает этапы по очереди:<br/>download → process → load →<br/>build-graph → export → analyze<br/>(с load — план)"}}
+    CLI -.-> F
+    CLI -.-> N
+    CLI -.-> L3
+    CLI -.-> NEO
+    CLI -.-> ES
