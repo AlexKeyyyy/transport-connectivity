@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import psycopg
+from psycopg.conninfo import make_conninfo
 
 
 def get_connection_string() -> str:
@@ -14,7 +15,7 @@ def get_connection_string() -> str:
     db = os.getenv("POSTGRES_DB", "transport_connectivity")
     user = os.getenv("POSTGRES_USER", "postgres")
     password = os.getenv("POSTGRES_PASSWORD", "postgres")
-    return f"postgresql://{user}:{password}@{host}:{port}/{db}"
+    return make_conninfo(host=host, port=port, dbname=db, user=user, password=password)
 
 
 def run_migrations(migrations_dir: Path | None = None) -> list[str]:
@@ -25,7 +26,7 @@ def run_migrations(migrations_dir: Path | None = None) -> list[str]:
     conn_str = get_connection_string()
     applied_versions: list[str] = []
 
-    with psycopg.connect(conn_str) as conn:
+    with psycopg.connect(conn_str, autocommit=True) as conn:
         with conn.cursor() as cur:
             # Ensure schema_migrations table exists
             cur.execute(
@@ -36,7 +37,6 @@ def run_migrations(migrations_dir: Path | None = None) -> list[str]:
                 );
                 """
             )
-            conn.commit()
 
             # Get already applied versions
             cur.execute("SELECT version FROM schema_migrations;")

@@ -235,13 +235,9 @@ def run_process(args: argparse.Namespace) -> int:
 
 
 def run_migrate() -> int:
-    import psycopg
-
-    from transport_connectivity.db.migrate import get_connection_string, run_migrations
+    from transport_connectivity.db.migrate import run_migrations
 
     try:
-        with psycopg.connect(get_connection_string()):
-            pass
         applied = run_migrations()
     except Exception as error:
         print(f"error: {error}", file=sys.stderr)

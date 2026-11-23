@@ -50,11 +50,36 @@ def _null_if_empty(value: str | None) -> str | None:
     return stripped if stripped else None
 
 
-def _parse_bool(value: str | None, default: bool = False) -> bool:
-    cleaned = _null_if_empty(value)
-    if cleaned is None:
-        return default
-    return cleaned.lower() in {"1", "true", "t", "yes", "y"}
+def _city_values(
+    row: dict[str, str], snapshot_id: str
+) -> tuple[str, str | None, str | None, int | None, str | None, str]:
+    population = _null_if_empty(row["population"])
+    return (
+        row["city_id"],
+        _null_if_empty(row["name"]),
+        _null_if_empty(row["region"]),
+        int(population) if population is not None else None,
+        _make_point_ewkt(row["longitude"], row["latitude"]),
+        snapshot_id,
+    )
+
+
+def _measurement_values(row: dict[str, str], snapshot_id: str) -> tuple[str | int | None, ...]:
+    if row["snapshot_id"] != snapshot_id:
+        raise ValueError("Measurement snapshot_id does not match run-report.json")
+    return (
+        row["measurement_id"],
+        snapshot_id,
+        int(row["source_row_number"]),
+        row["from_city_id"],
+        row["to_city_id"],
+        row["transport_type"],
+        _null_if_empty(row["distance_m"]),
+        _null_if_empty(row["duration_sec"]),
+        _null_if_empty(row["missing_reason_raw"]),
+        _null_if_empty(row["source_raw"]),
+        _null_if_empty(row["comment_raw"]),
+    )
 
 
 def _make_point_ewkt(lon: str | None, lat: str | None) -> str | None:
@@ -97,22 +122,11 @@ def _verify_output_hashes(
 
 
 def _extract_expected_counts(report: dict[str, Any]) -> dict[str, int]:
-    output_meta = report.get("output") or {}
-    balance = report.get("balance") or {}
+    output = report["output"]
     return {
-        "city": int(output_meta["cities.csv"]["rows"]),
-        "route_measurement": int(
-            balance.get(
-                "route_measurements",
-                output_meta["route_measurements.csv"]["rows"],
-            )
-        ),
-        "rejected_row": int(
-            balance.get(
-                "rejected_rows",
-                output_meta["rejected_rows.csv"]["rows"],
-            )
-        ),
+        "city": int(output["cities.csv"]["rows"]),
+        "route_measurement": int(output["route_measurements.csv"]["rows"]),
+        "rejected_row": int(output["rejected_rows.csv"]["rows"]),
     }
 
 
@@ -124,280 +138,243 @@ def load_snapshot(
     manifest = _load_json(raw_dir / "manifest.json")
     report = _load_json(normalized_dir / "run-report.json")
 
-    status = str(report.get("status") or "")
+    status = report.get("status")
     if status not in ALLOWED_REPORT_STATUSES:
-        raise ValueError(
-            f"Unsupported run-report status '{status}'. "
-            f"Expected one of: {sorted(ALLOWED_REPORT_STATUSES)}"
-        )
+        raise ValueError(f"Unsupported run-report status '{status}'")
+
+    snapshot_id = manifest["snapshot_id"]
+    if snapshot_id != report.get("snapshot_id"):
+        raise ValueError("snapshot_id differs between manifest.json and run-report.json")
+    source_sha256 = manifest.get("csv_sha256")
+    if not source_sha256 or source_sha256 != report.get("input", {}).get("sha256"):
+        raise ValueError("Input SHA-256 differs between manifest.json and run-report.json")
 
     csv_files = _verify_output_hashes(normalized_dir, report)
     expected_counts = _extract_expected_counts(report)
-
-    snapshot_id = str(manifest["snapshot_id"])
-    source_sha256 = str(manifest.get("csv_sha256") or manifest.get("sha256") or "")
-    if not source_sha256:
-        raise ValueError("Missing csv_sha256 in manifest.json")
-
-    record_count = int(manifest["row_count"])
+    record_count = manifest["row_count"]
     retrieved_at = manifest["downloaded_at_utc"]
+    file_name = manifest["csv_filename"]
+    if not file_name or file_name in {".", ".."} or any(char in file_name for char in "/\\:"):
+        raise ValueError("manifest.json csv_filename must be a file name without a path")
 
-    balance = report.get("balance") or {}
-    duplicates = report.get("duplicates") or {}
-    service = report.get("service") or {}
-
-    contract_version = str(report.get("contract_version", ""))
-    code_commit = str(service.get("code_version") or report.get("code_commit") or "")
-    rows_read = int(balance.get("rows_read", expected_counts["route_measurement"]))
+    balance = report["balance"]
+    service = report["service"]
+    contract_version = report["contract_version"]
+    code_commit = service["code_version"]
+    rows_read = balance["rows_read"]
     rows_written = expected_counts["route_measurement"]
     rows_rejected = expected_counts["rejected_row"]
-    duplicates_removed = int(duplicates.get("exact_duplicate", 0))
+    if (
+        rows_written != balance["route_measurements"]
+        or rows_rejected != balance["rejected_rows"]
+        or rows_read != rows_written + rows_rejected
+        or rows_read != record_count
+    ):
+        raise ValueError("Row counts disagree between manifest, output metadata and balance")
+
     started_at = service.get("started_at_utc") or retrieved_at
-    finished_at = service.get("finished_at_utc") or retrieved_at
+    finished_at = service.get("finished_at_utc")
 
-    conn_str = get_connection_string()
-    with psycopg.connect(conn_str) as conn:
+    with psycopg.connect(get_connection_string()) as conn:
         with conn.cursor() as cur:
+            # 1. data_source
             cur.execute(
-                "SELECT sha256 FROM data_snapshot WHERE snapshot_id = %s;",
-                (snapshot_id,),
+                """
+                INSERT INTO data_source (source_id, name, license)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (source_id) DO NOTHING;
+                """,
+                (SOURCE_ID, SOURCE_NAME, "CC BY 4.0"),
             )
-            existing = cur.fetchone()
-            if existing is not None:
-                existing_sha = str(existing[0])
-                if existing_sha.lower() == source_sha256.lower():
-                    return LoadResult(
-                        snapshot_id=snapshot_id,
-                        already_loaded=True,
-                        counts={},
-                    )
-                raise ValueError(
-                    f"Snapshot '{snapshot_id}' already exists with different SHA-256: "
-                    f"db={existing_sha}, manifest={source_sha256}"
-                )
 
-        with conn.transaction():
-            with conn.cursor() as cur:
-                # 1. data_source
+            # 2. data_snapshot
+            cur.execute(
+                """
+                INSERT INTO data_snapshot (
+                    snapshot_id,
+                    source_id,
+                    sha256,
+                    file_name,
+                    record_count,
+                    manifest,
+                    retrieved_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s)
+                ON CONFLICT (snapshot_id) DO NOTHING
+                RETURNING snapshot_id;
+                """,
+                (
+                    snapshot_id,
+                    SOURCE_ID,
+                    source_sha256,
+                    file_name,
+                    record_count,
+                    json.dumps(manifest, ensure_ascii=False),
+                    retrieved_at,
+                ),
+            )
+
+            if cur.fetchone() is None:
                 cur.execute(
-                    """
-                    INSERT INTO data_source (source_id, name)
-                    VALUES (%s, %s)
-                    ON CONFLICT (source_id) DO NOTHING;
-                    """,
-                    (SOURCE_ID, SOURCE_NAME),
+                    "SELECT sha256 FROM data_snapshot WHERE snapshot_id = %s", (snapshot_id,)
                 )
+                existing = cur.fetchone()
+                if existing is not None and existing[0] == source_sha256:
+                    return LoadResult(snapshot_id=snapshot_id, already_loaded=True, counts={})
+                raise ValueError(f"Snapshot '{snapshot_id}' already exists with different SHA-256")
 
-                # 2. data_snapshot
-                cur.execute(
-                    """
-                    INSERT INTO data_snapshot (
-                        snapshot_id,
-                        source_id,
-                        sha256,
-                        record_count,
-                        manifest,
-                        retrieved_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s::jsonb, %s);
-                    """,
-                    (
-                        snapshot_id,
-                        SOURCE_ID,
-                        source_sha256,
-                        record_count,
-                        json.dumps(manifest, ensure_ascii=False),
-                        retrieved_at,
-                    ),
+            # 3. load_run
+            cur.execute(
+                """
+                INSERT INTO load_run (
+                    snapshot_id,
+                    status,
+                    contract_version,
+                    code_commit,
+                    rows_read,
+                    rows_written,
+                    rows_rejected,
+                    started_at,
+                    finished_at
                 )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING load_run_id;
+                """,
+                (
+                    snapshot_id,
+                    status,
+                    contract_version,
+                    code_commit,
+                    rows_read,
+                    rows_written,
+                    rows_rejected,
+                    started_at,
+                    finished_at,
+                ),
+            )
+            load_run_id = cur.fetchone()[0]
 
-                # 3. load_run
-                cur.execute(
-                    """
-                    INSERT INTO load_run (
-                        snapshot_id,
-                        status,
-                        contract_version,
-                        code_commit,
-                        rows_read,
-                        rows_written,
-                        rows_rejected,
-                        duplicates_removed,
-                        started_at,
-                        finished_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING load_run_id;
-                    """,
-                    (
-                        snapshot_id,
-                        status,
-                        contract_version,
-                        code_commit,
-                        rows_read,
-                        rows_written,
-                        rows_rejected,
-                        duplicates_removed,
-                        started_at,
-                        finished_at,
-                    ),
-                )
-                load_run_id = cur.fetchone()[0]
-
-                # 4. Bulk COPY: city + сбор внешних идентификаторов
-                external_id_rows: list[tuple[str, str, str]] = []
-                with csv_files["cities"].open("r", encoding="utf-8", newline="") as fh:
-                    reader = csv.DictReader(fh)
-                    with cur.copy(
-                        """
-                        COPY city (
-                            city_id,
-                            name,
-                            region,
-                            oktmo,
-                            is_capital,
-                            population,
-                            location,
-                            attributes_snapshot_id
-                        ) FROM STDIN
-                        """
-                    ) as copy:
-                        for row in reader:
-                            city_id = row["city_id"].strip()
-                            oktmo = _null_if_empty(row.get("oktmo"))
-                            is_capital = _parse_bool(row.get("is_capital"), default=False)
-                            population = int(float(row["population"]))
-                            location = _make_point_ewkt(
-                                row.get("longitude"),
-                                row.get("latitude"),
-                            )
-                            copy.write_row(
-                                (
-                                    city_id,
-                                    row["name"],
-                                    row["region"],
-                                    oktmo,
-                                    is_capital,
-                                    population,
-                                    location,
-                                    snapshot_id,
-                                )
-                            )
-
-                            id_namespace = _null_if_empty(row.get("id_namespace"))
-                            source_city_id = _null_if_empty(row.get("source_city_id"))
-                            if id_namespace is not None and source_city_id is not None:
-                                external_id_rows.append((city_id, id_namespace, source_city_id))
-
-                            if oktmo is not None:
-                                external_id_rows.append((city_id, "oktmo", oktmo))
-
-                # 5. Bulk COPY: city_external_id
+            # 4. Bulk COPY: city + сбор внешних идентификаторов
+            external_id_rows: list[tuple[str, str, str, str]] = []
+            with csv_files["cities"].open("r", encoding="utf-8", newline="") as fh:
+                reader = csv.DictReader(fh)
                 with cur.copy(
                     """
-                    COPY city_external_id (
+                    COPY city (
                         city_id,
-                        id_namespace,
-                        external_id
+                        name,
+                        region,
+                        population,
+                        location,
+                        attributes_snapshot_id
                     ) FROM STDIN
                     """
                 ) as copy:
-                    for ext_row in external_id_rows:
-                        copy.write_row(ext_row)
-
-                # 6. Bulk COPY: route_measurement
-                with csv_files["route_measurements"].open("r", encoding="utf-8", newline="") as fh:
-                    reader = csv.DictReader(fh)
-                    with cur.copy(
-                        """
-                        COPY route_measurement (
-                            measurement_id,
-                            snapshot_id,
-                            from_city_id,
-                            to_city_id,
-                            transport_type,
-                            distance_m,
-                            duration_sec,
-                            missing_reason,
-                            source,
-                            comment
-                        ) FROM STDIN
-                        """
-                    ) as copy:
-                        for row in reader:
-                            copy.write_row(
-                                (
-                                    row["measurement_id"].strip(),
-                                    snapshot_id,
-                                    row["from_city_id"].strip(),
-                                    row["to_city_id"].strip(),
-                                    row["transport_type"].strip(),
-                                    _null_if_empty(row.get("distance_m")),
-                                    _null_if_empty(row.get("duration_sec")),
-                                    _null_if_empty(row.get("missing_reason_raw")),
-                                    _null_if_empty(row.get("source_raw")),
-                                    _null_if_empty(row.get("comment_raw")),
-                                )
-                            )
-
-                # 7. Bulk COPY: rejected_row
-                with csv_files["rejected_rows"].open("r", encoding="utf-8", newline="") as fh:
-                    reader = csv.DictReader(fh)
-                    with cur.copy(
-                        """
-                        COPY rejected_row (
-                            load_run_id,
-                            source_row_number,
-                            reject_reason,
-                            detail,
-                            raw_json
-                        ) FROM STDIN
-                        """
-                    ) as copy:
-                        for row in reader:
-                            copy.write_row(
-                                (
-                                    load_run_id,
-                                    int(row["source_row_number"]),
-                                    row["reject_reason"],
-                                    _null_if_empty(row.get("detail")),
-                                    row["raw_json"],
-                                )
-                            )
-
-                # 8. Сверка счётчиков до коммита
-                cur.execute(
-                    "SELECT count(*) FROM city WHERE attributes_snapshot_id = %s;",
-                    (snapshot_id,),
-                )
-                actual_city = int(cur.fetchone()[0])
-
-                cur.execute(
-                    "SELECT count(*) FROM route_measurement WHERE snapshot_id = %s;",
-                    (snapshot_id,),
-                )
-                actual_routes = int(cur.fetchone()[0])
-
-                cur.execute(
-                    "SELECT count(*) FROM rejected_row WHERE load_run_id = %s;",
-                    (load_run_id,),
-                )
-                actual_rejected = int(cur.fetchone()[0])
-
-                actual_counts = {
-                    "city": actual_city,
-                    "city_external_id": len(external_id_rows),
-                    "route_measurement": actual_routes,
-                    "rejected_row": actual_rejected,
-                }
-
-                for table_name in ("city", "route_measurement", "rejected_row"):
-                    if actual_counts[table_name] != expected_counts[table_name]:
-                        raise RuntimeError(
-                            f"Row count mismatch for '{table_name}': "
-                            f"expected {expected_counts[table_name]}, "
-                            f"loaded {actual_counts[table_name]}"
+                    for row in reader:
+                        city_id = row["city_id"].strip()
+                        oktmo = _null_if_empty(row.get("oktmo"))
+                        copy.write_row(_city_values(row, snapshot_id))
+                        external_id_rows.append(
+                            (city_id, row["id_namespace"], row["source_city_id"], snapshot_id)
                         )
+                        if oktmo is not None:
+                            external_id_rows.append((city_id, "oktmo", oktmo, snapshot_id))
+
+            # 5. Bulk COPY: city_external_id
+            with cur.copy(
+                """
+                COPY city_external_id (
+                    city_id,
+                    id_namespace,
+                    external_id,
+                    snapshot_id
+                ) FROM STDIN
+                """
+            ) as copy:
+                for ext_row in external_id_rows:
+                    copy.write_row(ext_row)
+
+            # 6. Bulk COPY: route_measurement
+            with csv_files["route_measurements"].open("r", encoding="utf-8", newline="") as fh:
+                reader = csv.DictReader(fh)
+                with cur.copy(
+                    """
+                    COPY route_measurement (
+                        measurement_id,
+                        snapshot_id,
+                        source_row_number,
+                        from_city_id,
+                        to_city_id,
+                        transport_type,
+                        distance_m,
+                        duration_sec,
+                        missing_reason_raw,
+                        source_raw,
+                        comment_raw
+                    ) FROM STDIN
+                    """
+                ) as copy:
+                    for row in reader:
+                        copy.write_row(_measurement_values(row, snapshot_id))
+
+            # 7. Bulk COPY: rejected_row
+            with csv_files["rejected_rows"].open("r", encoding="utf-8", newline="") as fh:
+                reader = csv.DictReader(fh)
+                with cur.copy(
+                    """
+                    COPY rejected_row (
+                        load_run_id,
+                        source_row_number,
+                        reject_reason,
+                        detail,
+                        raw_json
+                    ) FROM STDIN
+                    """
+                ) as copy:
+                    for row in reader:
+                        copy.write_row(
+                            (
+                                load_run_id,
+                                int(row["source_row_number"]),
+                                row["reject_reason"],
+                                _null_if_empty(row.get("detail")),
+                                row["raw_json"],
+                            )
+                        )
+
+            # 8. Сверка счётчиков до коммита
+            cur.execute(
+                "SELECT count(*) FROM city WHERE attributes_snapshot_id = %s;",
+                (snapshot_id,),
+            )
+            actual_city = int(cur.fetchone()[0])
+
+            cur.execute(
+                "SELECT count(*) FROM route_measurement WHERE snapshot_id = %s;",
+                (snapshot_id,),
+            )
+            actual_routes = int(cur.fetchone()[0])
+
+            cur.execute(
+                "SELECT count(*) FROM rejected_row WHERE load_run_id = %s;",
+                (load_run_id,),
+            )
+            actual_rejected = int(cur.fetchone()[0])
+
+            actual_counts = {
+                "city": actual_city,
+                "city_external_id": len(external_id_rows),
+                "route_measurement": actual_routes,
+                "rejected_row": actual_rejected,
+            }
+
+            for table_name in ("city", "route_measurement", "rejected_row"):
+                if actual_counts[table_name] != expected_counts[table_name]:
+                    raise RuntimeError(
+                        f"Row count mismatch for '{table_name}': "
+                        f"expected {expected_counts[table_name]}, "
+                        f"loaded {actual_counts[table_name]}"
+                    )
 
     return LoadResult(
         snapshot_id=snapshot_id,
