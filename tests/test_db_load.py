@@ -171,6 +171,18 @@ def test_load_is_idempotent(tmp_path: Path) -> None:
         assert second.already_loaded
         assert second.counts == {}
 
+        manifest_path = raw_dir / "manifest.json"
+        report_path = norm_dir / "run-report.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        other_sha = "0" * 64
+        manifest["csv_sha256"] = other_sha
+        report["input"]["sha256"] = other_sha
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        with pytest.raises(ValueError, match="already exists with different SHA-256"):
+            load_snapshot(raw_dir, norm_dir)
+
         with psycopg.connect(get_connection_string()) as conn:
             with conn.cursor() as cur:
                 cur.execute(
