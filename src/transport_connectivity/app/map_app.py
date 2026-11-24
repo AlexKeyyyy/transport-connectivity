@@ -8,6 +8,7 @@ from html import escape
 
 import folium
 import streamlit as st
+from psycopg import Error as DatabaseError
 from streamlit_folium import st_folium
 
 from transport_connectivity.app import data
@@ -45,8 +46,11 @@ def draw_map(
     scenario_active: bool,
 ) -> None:
     overview = (61.0, 96.0)
-    center = (selected.latitude, selected.longitude) if selected else overview
-    zoom = 7 if selected else 3
+    center = overview
+    zoom = 3
+    if selected and selected.latitude is not None and selected.longitude is not None:
+        center = (selected.latitude, selected.longitude)
+        zoom = 7
     map_view = folium.Map(location=overview, zoom_start=3, tiles="OpenStreetMap")
     markers = folium.FeatureGroup(name="Города")
     breaks, colors = (
@@ -56,6 +60,8 @@ def draw_map(
     )
     metric_label = "Изменение доступного населения" if scenario_active else "Доступное население"
     for city in sorted(cities, key=lambda city: city == selected):
+        if city.latitude is None or city.longitude is None:
+            continue
         city_id = city.city_id
         active = city == selected
         centrality = betweenness.get(city_id)
@@ -135,13 +141,19 @@ def main() -> None:
         else "Доступность городов России, ключевые узлы и сценарии изменения сети"
     )
     try:
-        cities = data.load_cities(source)
-        scenarios = data.load_scenarios(source)
+        show_map(source)
     except FileNotFoundError:
         st.error("Подготовьте файл доступности по инструкции docs/map.md.")
-        return
-    except NotImplementedError as exc:
-        st.error(str(exc))
+    except DatabaseError:
+        st.error("Не удалось прочитать PostgreSQL. Проверьте подключение по docs/map.md.")
+
+
+def show_map(source: str) -> None:
+    cities = data.load_cities(source)
+    scenarios = data.load_scenarios(source)
+    available_layers = data.available_layers(source)
+    if source == "db" and (not cities or "best" not in available_layers):
+        st.info("Загрузите снимок и выполните команду accessibility по docs/map.md.")
         return
     warning = data.source_warning(source)
     if warning and source == "sample":
@@ -157,8 +169,7 @@ def main() -> None:
         disabled=not scenarios,
     )
     scenario = scenarios[scenario_index - 1] if scenario_index else None
-    combined = "best" if source == "offline" else "multimodal"
-    available_layers = (combined, "road", "rail", "air")
+    combined = "multimodal" if source == "sample" else "best"
     layer = layer_column.selectbox(
         "Транспорт",
         options=available_layers if scenario is None else (combined,),
@@ -172,10 +183,16 @@ def main() -> None:
     map_column, cities_column = st.columns([3, 1], gap="medium")
     cities_by_id = {city.city_id: city for city in cities}
     with cities_column:
+        query = st.text_input("Поиск по названию") if source == "db" else ""
+        matches, search_message = data.find_cities(query, cities)
+        if search_message:
+            st.info(search_message)
+        if query.strip() and not matches:
+            st.caption("Города по этому запросу не найдены.")
         selected_id = st.selectbox(
             "Найти город",
-            options=cities_by_id,
-            index=None,
+            options=[city.city_id for city in matches],
+            index=0 if query.strip() and len(matches) == 1 else None,
             placeholder="Введите название",
             format_func=lambda city_id: (
                 f"{cities_by_id[city_id].name} · {cities_by_id[city_id].region}"
@@ -197,9 +214,13 @@ def main() -> None:
                 show_destinations(destinations)
 
     metric = "scenario_reach_population_delta" if scenario else "reach_population"
-    values = data.load_metric(
-        metric, {"layer": layer, "threshold_sec": threshold}, scenario, source
-    )
+    try:
+        values = data.load_metric(
+            metric, {"layer": layer, "threshold_sec": threshold}, scenario, source
+        )
+    except data.ResultNotFound:
+        st.info("Для выбранного слоя и порога пока нет опубликованного расчёта.")
+        values = {}
     try:
         betweenness = data.load_metric("betweenness", {"layer": combined}, source=source)
     except data.ResultNotFound:

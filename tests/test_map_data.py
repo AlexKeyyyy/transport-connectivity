@@ -103,11 +103,9 @@ def test_cities_scenarios_and_warning() -> None:
     assert data.source_warning("sample") == "НЕНАСТОЯЩИЕ ДАННЫЕ"
 
 
-def test_unknown_and_unavailable_sources() -> None:
+def test_unknown_source() -> None:
     with pytest.raises(ValueError):
         data.load_cities("csv")
-    with pytest.raises(NotImplementedError):
-        data.load_cities("db")
 
 
 def test_committed_sample_is_marked_fake_and_covers_the_map() -> None:
@@ -156,3 +154,11 @@ def test_offline_source_preserves_boundary_and_missing_time(tmp_path, monkeypatc
     assert [item.city.city_id for item in data.reachable_within("A", "best", 21600, "offline")] == [
         "B"
     ]
+
+
+def test_search_uses_city_labels_without_elasticsearch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ELASTICSEARCH_URL", raising=False)
+    cities = data.load_cities()
+    matches, message = data.find_cities("  Орел  ", cities)
+    assert "Орёл" in {city.name for city in matches}
+    assert message is None
