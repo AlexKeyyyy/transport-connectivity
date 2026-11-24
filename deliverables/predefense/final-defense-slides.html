@@ -74,17 +74,17 @@ footer {position:absolute;bottom:23px;left:72px;right:72px;display:flex;justify-
 <section class="slide ">
 <h1>Снимок и измерения в PostgreSQL</h1>
 <div class="flow"><span>data_snapshot</span><b aria-hidden="true">→</b><span>load_run</span><b aria-hidden="true">→</b><span>route_measurement</span></div><div class="grid"><div><h3>Город и идентификаторы</h3><p>UUID связывает измерения с двумя городами. Sber ID и ОКТМО хранятся как внешние идентификаторы. Координаты WGS84 используются в PostGIS.</p></div><div><h3>Повторная загрузка</h3><p>В чистой базе перед и после повтора получили те же 180 городов, 360 внешних ID и 96 660 измерений. В базе один снимок и одна запись загрузки.</p></div></div><p class="takeaway">Запись сохраняет направление, вид транспорта, время в секундах и расстояние в метрах.</p>
-<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/9465248/docs/data-model.md">Модель данных</a> · #37, локальная проверка 668e72a</span><span>5</span></footer>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/9465248/docs/data-model.md">Модель данных</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/8034b85d4332cb9a487499e9f4ac9b4ff8337148/benchmarks/README.md">Проверка #37</a></span><span>5</span></footer>
 </section>
 <section class="slide ">
 <h1>Из матрицы в направленный граф</h1>
 <p class="lead">Сохраняем ребро A → B, если в полной матрице отсутствует обход через третий город C в пределах допуска.</p><p class="formula">t(A,C) + t(C,B) ≤ (1 + α) × t(A,B)</p><div class="grid"><div><h3>Вес в секундах</h3><p><code>road</code> и <code>rail</code> используют оценку источника. <code>best</code> берёт минимум после добавления 3 часов к времени полёта.</p></div><div><h3>Пример</h3><p>Москва → Орёл: 24 480 с. Через Тулу: 10 440 + 10 440 = 20 880 с. Ребро удаляется при всех трёх α.</p></div></div>
-<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/40">PR #40 · c0117c7, экспериментальная методика</a></span><span>6</span></footer>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/e1cec08/docs/graph-methodology.md">Методика графа · PR #40</a></span><span>6</span></footer>
 </section>
 <section class="slide ">
 <h1>Прореживание меняет достижимость</h1>
 <table><thead><tr><th>Слой и α</th><th>Рёбра</th><th>Пары матрицы, потерявшие путь</th></tr></thead><tbody><tr><td>best · 0,05</td><td>5 642</td><td>0</td></tr><tr><td>best · 0,10</td><td>3 218</td><td>0</td></tr><tr><td>best · 0,20</td><td>1 350</td><td>2 054</td></tr><tr><td>rail · 0,20</td><td>488</td><td>17 236 из 28 056</td></tr></tbody></table><p class="takeaway">Берём α = 0,05 для основного сравнения. При 0,20 агрессивное прореживание уже разрывает часть путей.</p>
-<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/40">Методика и отчёт PR #40</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/issues/35">Офлайн-прогон #35</a></span><span>7</span></footer>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/40">Методика и отчёт PR #40</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/8865d814d49fea80b040ca26dad3224553776456/docs/analysis-results.md">Офлайн-прогон #35</a></span><span>7</span></footer>
 </section>
 <section class="slide ">
 <h1>Доступность по матрице времени</h1>
@@ -99,7 +99,7 @@ footer {position:absolute;bottom:23px;left:72px;right:72px;display:flex;justify-
 <section class="slide ">
 <h1>Устойчивость графа из матрицы</h1>
 <p class="sub">Слой best · α = 0,05 · 180 городов · взвешенный расчёт Python</p><table><thead><tr><th>Сценарий</th><th>Величина</th><th>Результат</th></tr></thead><tbody><tr><td>Посредничество</td><td>Доля кратчайших путей, 0–1</td><td>Краснодар 0,0863 · Екатеринбург 0,0610 · Казань 0,0598</td></tr><tr><td>Удалить Москву</td><td>Достижимые пары среди остальных</td><td>31 862 → 31 862. Среднее время +0,031%</td></tr><tr><td>Удалить Томск</td><td>Потерянные направленные пары</td><td>356</td></tr><tr><td>Добавить ВСМ, 8 100 с</td><td>Доступное население за 6 ч</td><td>+224 286 из Москвы, +1 115 283 из Санкт-Петербурга</td></tr></tbody></table><p class="takeaway">Посредничество и потеря достижимости отвечают на разные вопросы. Сравнение чувствительности к α вынесено в отчёт.</p>
-<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/issues/35">Эксперимент #35</a> · локальный коммит 48f5f5b, методика c0117c7</span><span>10</span></footer>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/issues/35">Эксперимент #35</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/8865d814d49fea80b040ca26dad3224553776456/docs/analysis-results.md">Результаты и команда</a> · методика e1cec08</span><span>10</span></footer>
 </section>
 <section class="slide ">
 <h1>Яндекс Расписания: без Москвы</h1>
@@ -114,12 +114,12 @@ footer {position:absolute;bottom:23px;left:72px;right:72px;display:flex;justify-
 <section class="slide ">
 <h1>Сценарий показа</h1>
 <div class="flow"><span>Установить пакет</span><b aria-hidden="true">→</b><span>Экспортировать JSON</span><b aria-hidden="true">→</b><span>Запустить Streamlit</span></div><div class="grid"><div><h3>Основной эпизод</h3><p>Открыть карту, выбрать Москву, «Лучший из трёх» и 6 часов. Проверить 101 строку направлений.</p></div><div><h3>Резервный эпизод</h3><p>Показать скриншот и схему Абакан → Шереметьево → Грозный. Сравнить 4 900 и 3 660 пар.</p></div></div><p class="takeaway">Для демонстрации матрицы ключ Яндекс Расписаний не требуется.</p>
-<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/9465248/docs/map.md">Запуск карты</a> · локальная инструкция #37</span><span>13</span></footer>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/9465248/docs/map.md">Запуск карты</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/50">Инструкция #37</a></span><span>13</span></footer>
 </section>
 <section class="slide ">
 <h1>Время выполнения и пределы модели</h1>
 <table><thead><tr><th>Этап</th><th>Время, с</th><th>Пик Python, МиБ</th></tr></thead><tbody><tr><td>Проверка скачанного архива</td><td>0,770</td><td>163,47</td></tr><tr><td>Нормализация, 96 660 строк</td><td>25,230</td><td>595,71</td></tr><tr><td>Первая загрузка в БД</td><td>2,216</td><td>41,62</td></tr><tr><td>Офлайн-анализ девяти версий и сценариев</td><td>47,243</td><td>153,02</td></tr></tbody></table><p class="sub">По одному прогону · Windows 11 Pro · i5-12400F · 31,84 ГиБ · Python 3.12.3 · PostgreSQL 17.5 / PostGIS 3.5.2</p><ul><li>Число направленных пар растёт как N(N − 1). Текущий снимок обработан на одном узле.</li><li>Матрица даёт оценочные времена. Авиаснимок охватывает одну дату. Для второй даты нужны условия доступа к хранению и обработке.</li></ul>
-<footer><span>Локальные доказательства #37 и #35, 24 ноября 2026 года</span><span>14</span></footer>
+<footer><span>Замеры <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/8034b85d4332cb9a487499e9f4ac9b4ff8337148/benchmarks/README.md">#37</a> и <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/8865d814d49fea80b040ca26dad3224553776456/docs/analysis-results.md">#35</a> · 24 ноября 2026 года</span><span>14</span></footer>
 </section>
 <section class="slide ">
 <h1>Исследования и источники</h1>
