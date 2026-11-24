@@ -26,50 +26,75 @@
 ## От данных к результату
 
 ```text
-Снимок источника → download → CSV и manifest → process → нормализованные CSV
-                                                          ├─→ load → PostgreSQL/PostGIS
-                                                          └─→ экспорт JSON → карта Streamlit
-                                     migrate → схема PostgreSQL/PostGIS ↗
+Снимок → download → CSV и manifest → process → нормализованные CSV
+                                                ├─→ load → PostgreSQL/PostGIS → accessibility → карта
+                                                │                  └─→ build-graph → Neo4j/GDS
+                                                │                        └─→ сценарии в PostgreSQL → карта
+                                                ├─→ index-cities → Elasticsearch → поиск на карте
+                                                └─→ экспорт JSON → офлайн-карта
 ```
 
-PostgreSQL/PostGIS хранит нормализованные данные и аналитические таблицы.
-Карта запускается по выгрузке JSON. Neo4j и Elasticsearch предусмотрены как
-производные представления. [Архитектура и схема компонентов](docs/architecture.md)
+PostgreSQL/PostGIS хранит нормализованные данные и результаты. Neo4j получает
+копии версий графа для расчёта посредничества, Elasticsearch индексирует города
+из того же нормализованного справочника. [Архитектура](docs/architecture.md)
 
 ## Воспроизвести проверенный сценарий
 
-Нужны Git, Python 3.12+, Docker с Compose и интернет для первого скачивания
-данных и зависимостей. Команды ниже для PowerShell, из корня свежего checkout
-этой ветки. Для локального контейнера указан порт 55437. Если он занят,
-выберите свободный порт.
+Нужны Git, Python 3.12+, Docker с Compose и интернет для первичной установки и
+загрузки основного снимка. Команды выполняются из корня свежего клона. Порты
+ниже предназначены для отдельного локального запуска. Если какой-то занят,
+поменяйте его и в адресе соответствующего клиента.
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev,app]"
+python -m pip install -e ".[dev,app,neo4j]"
 
 python -m transport_connectivity.cli download
 python -m transport_connectivity.cli process
 
 $env:POSTGRES_HOST = "127.0.0.1"
-$env:POSTGRES_PORT = "55437"
+$env:POSTGRES_PORT = "55439"
 $env:POSTGRES_DB = "transport_connectivity"
 $env:POSTGRES_USER = "postgres"
 $env:POSTGRES_PASSWORD = "postgres"
-docker compose -p transport-defense up -d --wait postgres
+$env:NEO4J_HTTP_PORT = "57439"
+$env:NEO4J_BOLT_PORT = "57639"
+$env:NEO4J_URI = "bolt://127.0.0.1:57639"
+$env:NEO4J_USER = "neo4j"
+$env:NEO4J_PASSWORD = "transport-local-demo"
+$env:ELASTICSEARCH_PORT = "59339"
+$env:ELASTICSEARCH_URL = "http://127.0.0.1:59339"
+docker compose -p transport-defense up -d --wait postgres neo4j elasticsearch
+
 python -m transport_connectivity.cli migrate
 python -m transport_connectivity.cli load
 python -m transport_connectivity.cli load
-
-python scripts/dev/export_map_accessibility.py
-python scripts/dev/check.py
-python -m streamlit run src/transport_connectivity/app/map_app.py
+python -m transport_connectivity.cli accessibility --include-air
+python -m transport_connectivity.cli build-graph --all
+python -m transport_connectivity.cli export-graph --all-ready
+python -m transport_connectivity.cli key-nodes
+python -m transport_connectivity.cli node-removal
+python -m transport_connectivity.cli link-scenarios
+python -m transport_connectivity.cli index-cities
+python -m streamlit run src/transport_connectivity/app/map_app.py -- --source db
 ```
 
-В Linux/macOS активируйте окружение через `source .venv/bin/activate`, а переменные
-задайте через `export`. Если PowerShell блокирует активацию, вызовите
-`.venv\Scripts\python.exe` вместо `python` в последующих командах. После остановки
-Streamlit контейнер можно остановить командой `docker compose -p transport-defense stop`.
+Откройте адрес из вывода Streamlit. В Linux/macOS активируйте окружение через
+`source .venv/bin/activate`, переменные задайте через `export`. В PowerShell можно
+вызывать `.venv\Scripts\python.exe` вместо активации. После показа остановите
+Streamlit и выполните `docker compose -p transport-defense stop`.
+
+### Офлайн-показ
+
+После первоначальной нормализации можно подготовить и показать карту с локальным
+JSON. Для подложки OpenStreetMap нужен интернет, на случай его отсутствия есть
+скриншот ниже. API-ключ Яндекс Расписаний для обоих показов карты не нужен.
+
+```powershell
+python scripts/dev/export_map_accessibility.py
+python -m streamlit run src/transport_connectivity/app/map_app.py -- --source offline
+```
 
 ## Контрольные результаты
 
@@ -77,15 +102,17 @@ Streamlit контейнер можно остановить командой `d
 |---|---|---|
 | Нормализация полного снимка | 180 городов, 96 660 измерений, 0 отклонённых строк | [Отчёт прогона](deliverables/interim/evidence/processing-run-1.json) |
 | Первая и повторная загрузка в PostGIS | 180 городов, 360 внешних ID, 96 660 измерений, один запуск загрузки в базе | [Прогон и контрольный SQL](benchmarks/README.md) |
+| Проекции и расчёты | 9 графов по 180 городов, готовые метрики и сценарии | [Сквозной прогон](benchmarks/README.md) |
 | Карта, Москва, «Лучший из трёх», 6 часов | 101 достижимый город по матрице времени | [Проверка карты](docs/map.md) |
 | Авиаграф Яндекс Расписаний на 1 декабря | 482 ребра. При удалении Москвы число достижимых направленных пар среди остальных городов снизилось с 4 900 до 3 660 | [Эксперимент](deliverables/predefense/yandex-air-resilience.md) и [покрытие](deliverables/predefense/yandex-air-coverage.md) |
 
 ![Карта достижимости из Москвы за шесть часов](docs/map-reachability.png)
 
 Для карты выберите Москву через поиск, слой «Лучший из трёх» и порог 6 часов.
-Данные читаются из местного JSON. Для фоновой подложки OpenStreetMap нужен
-интернет. Для оценки стыковок по расписанию используйте отдельный авиационный
-пример из материалов защиты.
+В режиме базы запрос «Брянкс» находит Брянск. При включении сценария ВСМ
+изменение доступного населения из Москвы за 6 часов составляет +224 286 жителей.
+В сценарии «Без Москвы» значение для удалённого города отсутствует. Для примера
+стыковки по расписанию используйте отдельный авиационный эксперимент.
 
 ## Где что находится
 
@@ -96,11 +123,19 @@ Streamlit контейнер можно остановить командой `d
 | [`docs/`](docs/README.md) | Модель данных, диаграммы, ограничения и план |
 | [`tests/`](tests/) | Проверки преобразований, схемы и карты |
 | [`benchmarks/`](benchmarks/README.md) | Замеры времени и памяти |
-| [`deliverables/`](deliverables/interim/README.md) | Отчёты, материалы и доказательства запусков |
+| [`deliverables/`](https://github.com/AlexKeyyyy/transport-connectivity/pull/52) | Отчёты, материалы и доказательства запусков |
 
-Алексей собирает материалы и проверяет устойчивость, Лина отвечает за методику
-графа, Елисей — за хранение и доступность, Мадина — за Neo4j и поиск, Ранис — за
-карту. [Чек-лист финальной защиты и задачи команды](docs/defense-checklist.md)
+### Вклад команды
+
+| Участник | Работа и проверяемые изменения |
+|---|---|
+| Алексей | Сбор и обработка расписаний, аналитические расчёты и интеграция. [#42](https://github.com/AlexKeyyyy/transport-connectivity/pull/42), [#51](https://github.com/AlexKeyyyy/transport-connectivity/pull/51), [#56](https://github.com/AlexKeyyyy/transport-connectivity/pull/56) |
+| Елисей | Миграции, транзакционная загрузка и аналитическая схема PostgreSQL. [#41](https://github.com/AlexKeyyyy/transport-connectivity/pull/41), [#47](https://github.com/AlexKeyyyy/transport-connectivity/pull/47) |
+| Лина | Методика и код построения прореженного графа. [#40](https://github.com/AlexKeyyyy/transport-connectivity/pull/40) |
+| Мадина | Поиск городов в Elasticsearch. [#48](https://github.com/AlexKeyyyy/transport-connectivity/pull/48) |
+| Ранис | Офлайн-карта доступности и интерфейс демонстрации. [#49](https://github.com/AlexKeyyyy/transport-connectivity/pull/49) |
+
+[Чек-лист финальной защиты](docs/defense-checklist.md)
 
 ## Как работаем
 

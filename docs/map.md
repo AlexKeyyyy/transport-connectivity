@@ -59,11 +59,9 @@ python -m streamlit run src/transport_connectivity/app/map_app.py
 значение отсутствует. С индексом Elasticsearch запрос «Брянкс»
 находит Брянск.
 
-Контроль 25 ноября 2026 года выполнен на полном снимке и отдельно
-подготовленных графах. Поиск проверен с Elasticsearch 8.19.0 и
-[кодом PR #48](https://github.com/AlexKeyyyy/transport-connectivity/pull/48)
-в локальном индексе из 180 городов. Сквозная сборка из `develop`
-зависит от принятия графовой интеграции и поиска.
+Контроль 25 ноября 2026 года выполнен с чистого клона `67d7c23` и пустых
+томов PostgreSQL, Neo4j и Elasticsearch. Поиск проверен с Elasticsearch
+8.19.0 на индексе из 180 городов. [Сквозной прогон](../benchmarks/README.md)
 
 ![Обзор доступности](map-overview.png)
 

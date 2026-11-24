@@ -1,63 +1,58 @@
-# Замеры полного снимка
+# Сквозной прогон и замеры
 
-24 ноября 2026 года, 22:56 МСК. Чистый клон `61158ce` от `develop` `9465248`.
-Windows 11 Pro, Intel Core i5-12400F (12 логических процессоров), 31,84 ГиБ
-доступной системе физической памяти. Python 3.12.3, Docker Desktop 4.41.2,
-PostgreSQL 17.5, PostGIS 3.5.2. Снимок `tochno_intercity_v20260629` содержит
-96 660 строк в CSV объёмом 23 511 679 байт.
-[Manifest и контрольная сумма](../deliverables/interim/evidence/source-manifest.json)
+25 ноября 2026 года, МСК. Свежий клон с коммитом
+[`67d7c23`](https://github.com/AlexKeyyyy/transport-connectivity/commit/67d7c23e656682306754dddd1b7272f40130706e),
+новое окружение Python и пустые тома Docker Compose.
+Windows 11 Pro, Intel Core i5-12400F (12 логических процессоров), 31,84 ГиБ,
+Python 3.12.3. Сервисы: PostgreSQL 17.5, PostGIS 3.5.2, Neo4j 5.26.0,
+GDS 2.13.2 и Elasticsearch 8.19.0.
 
-| Этап | Время по часам, с | Пик памяти Python, МиБ |
+Вход — `tochno_intercity_v20260629`, 96 660 записей в CSV объёмом
+23 511 679 байт. [Манифест снимка](../deliverables/interim/evidence/source-manifest.json)
+
+| Этап | Время, с | Пиковый рабочий набор Python, МиБ |
 |---|---:|---:|
-| `download --offline` | 0,770 | 163,47 |
-| `process` | 25,230 | 595,71 |
-| `migrate` в пустую базу | 0,370 | 36,23 |
-| Первый `load` | 2,216 | 41,62 |
-| Повторный `load` | 0,329 | 36,91 |
-| Экспорт карты | 0,762 | 59,14 |
+| `download --offline` | 1,077 | 191,32 |
+| `process` | 25,215 | 622,52 |
+| `migrate` | 0,749 | 63,98 |
+| `load` | 2,875 | 69,10 |
+| `load (повтор)` | 0,612 | 64,80 |
+| `accessibility --include-air` | 3,737 | 136,15 |
+| `build-graph --all` | 4,378 | 172,12 |
+| `export-graph --all-ready` | 5,757 | 144,47 |
+| `key-nodes` | 4,713 | 140,70 |
+| `node-removal` | 61,206 | 76,59 |
+| `link-scenarios` | 2,993 | 88,79 |
+| `index-cities` | 1,254 | 63,59 |
+| `Экспорт офлайн-карты` | 0,680 | 57,59 |
 
-Один проход, по одному процессу Python на команду. Время измеряет
-`perf_counter` от запуска Python-модуля или скрипта до выхода из него.
-Память — пиковый рабочий набор процесса на Windows. На Linux/macOS скрипт
-читает `ru_maxrss`. Таблица учитывает клиентский процесс. Запуск Docker,
-память сервера PostgreSQL, интернет-загрузка и отрисовка карты в браузере
-в замеры не входят. Наибольшие время и пиковое потребление памяти в этом
-проходе пришлись на нормализацию.
+Один проход. Каждый этап запущен в отдельном процессе Python. Скрипт измеряет
+`perf_counter` от входа в модуль до завершения и пиковую память клиентского
+процесса. Память сервисов и запуск контейнеров в таблицу не входят.
+Сетевое скачивание выполнено перед замером проверки кэша. Наибольшее время
+заняло удаление узлов, наибольшая пиковая память — нормализация.
 
 ## Повторить
 
-Используйте [инструкцию запуска](../README.md#воспроизвести-проверенный-сценарий)
-с отдельной пустой базой. Сначала выполните сетевой `download` и запустите
-PostGIS, затем выполните команды ниже вместо соответствующих команд README.
+Выполните [команды README](../README.md#воспроизвести-проверенный-сценарий)
+в отдельных пустых контейнерах. Для замера замените нужные вызовы на:
 
 ```powershell
 python benchmarks/measure.py -m transport_connectivity.cli download --offline
 python benchmarks/measure.py -m transport_connectivity.cli process
-python benchmarks/measure.py -m transport_connectivity.cli migrate
 python benchmarks/measure.py -m transport_connectivity.cli load
-python benchmarks/measure.py -m transport_connectivity.cli load
+python benchmarks/measure.py -m transport_connectivity.cli build-graph --all
+python benchmarks/measure.py -m transport_connectivity.cli key-nodes
+python benchmarks/measure.py -m transport_connectivity.cli node-removal
 python benchmarks/measure.py scripts/dev/export_map_accessibility.py
 ```
 
-Скрипт также принимает путь к Python-скрипту расчёта и его аргументы. Замеры
-`build-graph`, расчётов с БД и проекции GDS появятся после интеграции
-[#28](https://github.com/AlexKeyyyy/transport-connectivity/issues/28),
-[#33](https://github.com/AlexKeyyyy/transport-connectivity/issues/33) и
-[#34](https://github.com/AlexKeyyyy/transport-connectivity/issues/34).
+## Контрольные значения
 
-## Контроль чистого клона
-
-Первый `download` скачал архив из источника. Нормализация прочитала 96 660
-строк, записала 96 660 измерений и 0 отклонений. SHA-256 нормализованного
-`route_measurements.csv`:
-
-```text
-719f0d87035242548b72ee0764b9c7f4ddd35a077af708ecfec8bba04d2248e6
-```
-
-Применились четыре миграции, включая аналитический слой. Первый `load`
-записал снимок, повторный сообщил `already loaded`. После каждого вызова
-проверен один и тот же результат SQL в свежем контейнере.
+Нормализация записала 96 660 измерений и 0 отклонений. SHA-256
+`route_measurements.csv` — `719f0d87035242548b72ee0764b9c7f4ddd35a077af708ecfec8bba04d2248e6`.
+Применились четыре миграции. После первого и повторного `load`
+контрольный запрос вернул один и тот же результат:
 
 ```sql
 SELECT (SELECT count(*) FROM city) AS cities,
@@ -69,6 +64,15 @@ SELECT (SELECT count(*) FROM city) AS cities,
 -- 180 | 360 | 96660 | 0 | 1 | 1
 ```
 
-Выгрузка карты успешно прочитана в Streamlit. Тест интерфейса выбрал Москву,
-слой «Лучший из трёх», 6 часов и проверил 101 строку в таблице направлений.
-[Инструкция и скриншот карты](../docs/map.md)
+- `accessibility --include-air` опубликовала 12 пороговых запусков и 4 слоя времени.
+- `build-graph --all` и `export-graph --all-ready` дали 9 версий по 180 вершин.
+  Число рёбер каждой версии совпало в PostgreSQL и Neo4j.
+  [Таблица по слоям и α](../docs/neo4j.md#проверка-gds)
+- `key-nodes`, `node-removal` и `link-scenarios` создали 9, 12 и 23 запуска
+  соответственно. Всего в аналитической базе 60 готовых запусков с учётом
+  доступности. [Сценарии и методика](../docs/analysis-results.md)
+- `index-cities` опубликовала 180 городов с координатами через псевдоним `cities`.
+- Streamlit в режимах базы и офлайн показал 101 город из Москвы за 6 ч.
+  В режиме базы «Брянкс» нашёл Брянск. Для ВСМ из Москвы получен прирост
+  +224 286 жителей. В сценарии удаления значение для Москвы отсутствует.
+  [Контрольный показ](../docs/map.md#контрольные-примеры)
