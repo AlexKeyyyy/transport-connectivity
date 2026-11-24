@@ -3,7 +3,7 @@
 The map reads cities and ``metric_result`` rows (reference in docs/data-model.md, #32)
 and computes nothing itself. Sources: ``offline`` — precomputed availability;
 ``sample`` — the fake stub ``sample_results.json``;
-``db`` — PostgreSQL, available after the analytic tables (#32) are merged.
+``db`` — published runs in PostgreSQL.
 
 Two kinds of "nothing" are kept apart: ``ResultNotFound`` means the run or the rows were
 never computed, while ``None`` as a value means the metric is undefined for that city,
@@ -16,8 +16,11 @@ import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import lru_cache
+from os import getenv
 from pathlib import Path
 from typing import Any
+
+from transport_connectivity.app import postgres
 
 SOURCES = ("offline", "sample", "db")
 OFFLINE_PATH = Path("data/normalized/map_accessibility.json")
@@ -33,9 +36,9 @@ class City:
     city_id: str
     name: str
     region: str
-    latitude: float
-    longitude: float
-    population: int
+    latitude: float | None
+    longitude: float | None
+    population: int | None
 
 
 @dataclass(frozen=True)
@@ -71,8 +74,6 @@ def _sample(source: str) -> _Sample:
         return _load_sample(SAMPLE_PATH)
     if source == "offline":
         return _load_sample(OFFLINE_PATH)
-    if source == "db":
-        raise NotImplementedError("Источник db появится после аналитических таблиц (#32).")
     raise ValueError(f"Неизвестный источник {source!r}; допустимо: {', '.join(SOURCES)}")
 
 
@@ -93,11 +94,57 @@ def source_warning(source: str) -> str | None:
 
 
 def load_cities(source: str = "sample") -> list[City]:
-    return sorted(_sample(source).cities, key=lambda city: city.name)
+    cities = (
+        (City(*row) for row in postgres.city_rows()) if source == "db" else _sample(source).cities
+    )
+    return sorted(cities, key=lambda city: (city.name, city.city_id))
+
+
+def available_layers(source: str) -> tuple[str, ...]:
+    combined = "multimodal" if source == "sample" else "best"
+    layers = (combined, "road", "rail", "air")
+    if source == "db":
+        published = postgres.published_layers()
+        return tuple(layer for layer in layers if layer in published)
+    return layers
+
+
+def find_cities(query: str, cities: list[City]) -> tuple[list[City], str | None]:
+    """Search the published index when configured, otherwise match the local city list."""
+    term = query.strip()
+    if not term:
+        return cities, None
+    url = getenv("ELASTICSEARCH_URL")
+    if url:
+        try:
+            from elasticsearch import ApiError, Elasticsearch, TransportError
+
+            from transport_connectivity.search import search_cities
+        except ModuleNotFoundError as error:
+            if error.name not in ("elasticsearch", "transport_connectivity.search"):
+                raise
+            message = "Поиск Elasticsearch ещё не подключён. Используется список городов."
+        else:
+            try:
+                with Elasticsearch(url, request_timeout=2, max_retries=0) as client:
+                    hits = search_cities(client, term)
+            except (ApiError, TransportError):
+                message = "Поиск Elasticsearch недоступен. Используется список городов."
+            else:
+                by_id = {city.city_id: city for city in cities}
+                return [by_id[hit["city_id"]] for hit in hits if hit["city_id"] in by_id], None
+    else:
+        message = None
+    normalized = term.casefold().replace("ё", "е")
+    return [
+        city for city in cities if normalized in city.name.casefold().replace("ё", "е")
+    ], message
 
 
 def load_scenarios(source: str = "sample") -> list[dict[str, Any]]:
     """Distinct scenarios that have results, in run order."""
+    if source == "db":
+        return postgres.scenario_rows()
     scenarios: list[dict[str, Any]] = []
     for run in _sample(source).runs:
         if run["scenario"] is not None and run["scenario"] not in scenarios:
@@ -111,14 +158,23 @@ def load_metric(
     scenario: Mapping[str, Any] | None = None,
     source: str = "sample",
 ) -> dict[str, float | None]:
-    """Per-city metric (no second city) of the run with exactly these parameters."""
-    values = _metric_values(_sample(source), metric, parameters, scenario)
+    """Read a published per-city metric for the requested parameters."""
+    if source == "db":
+        values = postgres.metric_values(metric, parameters, scenario)
+        if not values:
+            raise ResultNotFound(f"Нет расчёта {metric} с параметрами {dict(parameters)}")
+    else:
+        values = _metric_values(_sample(source), metric, parameters, scenario)
     return {city: value for (city, other), value in values.items() if other is None}
 
 
 def load_travel_times(city_id: str, layer: str, source: str = "sample") -> dict[str, float | None]:
     """Travel time from the city to every other city; None — no connection."""
-    values = _metric_values(_sample(source), "travel_time_sec", {"layer": layer}, None)
+    parameters = {"layer": layer}
+    if source == "db":
+        values = postgres.metric_values("travel_time_sec", parameters, None, origin=city_id)
+    else:
+        values = _metric_values(_sample(source), "travel_time_sec", parameters, None)
     times = {
         other: value
         for (city, other), value in values.items()
