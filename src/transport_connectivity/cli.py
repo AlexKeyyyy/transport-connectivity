@@ -12,6 +12,8 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
+from psycopg import Error as DatabaseError
+
 from transport_connectivity.air_resilience import analyze_air_resilience
 from transport_connectivity.connector import (
     DATASET_URL,
@@ -19,6 +21,7 @@ from transport_connectivity.connector import (
     ConnectorError,
     fetch_full_dataset,
 )
+from transport_connectivity.db.accessibility import DEFAULT_SNAPSHOT_ID, run_accessibility
 from transport_connectivity.db.load import (
     DEFAULT_NORMALIZED_DIR,
     load_snapshot,
@@ -113,6 +116,16 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_NORMALIZED_DIR,
         help="Directory containing run-report.json and CSVs (default: %(default)s).",
+    )
+
+    access = subparsers.add_parser(
+        "accessibility",
+        help="Compute and store threshold accessibility and travel times in PostgreSQL.",
+    )
+    access.add_argument(
+        "--snapshot-id",
+        default=DEFAULT_SNAPSHOT_ID,
+        help="ID of the loaded snapshot (default: %(default)s).",
     )
 
     rasp = subparsers.add_parser(
@@ -267,6 +280,16 @@ def run_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_accessibility_command(args: argparse.Namespace) -> int:
+    try:
+        report = run_accessibility(args.snapshot_id, code_version=current_code_version())
+    except (DatabaseError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    return 0
+
+
 def run_rasp_download(args: argparse.Namespace) -> int:
     try:
         client = None
@@ -336,6 +359,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_migrate()
     if args.command == "load":
         return run_load(args)
+    if args.command == "accessibility":
+        return run_accessibility_command(args)
     if args.command == "rasp-download":
         return run_rasp_download(args)
     if args.command == "rasp-process":

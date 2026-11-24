@@ -62,6 +62,7 @@ Neo4j и Elasticsearch получают копию нужной части да�
 | `download` | URL и версия источника | Файл в `data/raw/` и manifest | Реализовано (#7) |
 | `process` | Файл и manifest | Нормализованные CSV, отклонённые строки, отчёт запуска | Реализовано (#8) |
 | `load` | Результат `process` | Записи в PostgreSQL в одной транзакции | Реализовано (#27) |
+| `accessibility` | Загруженный снимок матрицы | Пороговые метрики и время направленных пар в `analysis_run` и `metric_result` | [Реализовано (#33)](accessibility.md) |
 | `build-graph` | Снимки и версия методики | `graph_snapshot` со статусом `ready` | План, после методики |
 | `export` | Версия графа или города | Проекция Neo4j, индекс Elasticsearch | План |
 | `analyze` | Версия графа, алгоритм, параметры | `analysis_run` и `metric_result` | План |
