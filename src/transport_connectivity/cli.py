@@ -11,6 +11,7 @@ import sys
 from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
+from uuid import UUID
 
 from psycopg import Error as DatabaseError
 
@@ -26,6 +27,7 @@ from transport_connectivity.db.load import (
     DEFAULT_NORMALIZED_DIR,
     load_snapshot,
 )
+from transport_connectivity.db.resilience import COMMAND_LAYERS, run_analysis
 from transport_connectivity.processor import (
     DEFAULT_OUTPUT_ROOT,
     ProcessingError,
@@ -117,6 +119,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_NORMALIZED_DIR,
         help="Directory containing run-report.json and CSVs (default: %(default)s).",
     )
+
+    analysis_help = {
+        "key-nodes": "Calculate weighted betweenness in GDS and store it in PostgreSQL.",
+        "node-removal": "Rank cities by removal impact and store the Moscow scenario.",
+        "link-scenarios": "Store the high-speed rail and suggested-link scenarios.",
+    }
+    for command, help_text in analysis_help.items():
+        analysis = subparsers.add_parser(command, help=help_text)
+        analysis.add_argument("--snapshot-id", default=DEFAULT_SNAPSHOT_ID)
+        analysis.add_argument("--graph-snapshot", type=UUID, help="Run only this ready graph UUID.")
 
     access = subparsers.add_parser(
         "accessibility",
@@ -280,6 +292,18 @@ def run_load(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_analysis_command(args: argparse.Namespace) -> int:
+    try:
+        report = run_analysis(
+            args.command, args.snapshot_id, args.graph_snapshot, code_commit=current_code_version()
+        )
+    except (DatabaseError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
 def run_accessibility_command(args: argparse.Namespace) -> int:
     try:
         report = run_accessibility(args.snapshot_id, code_version=current_code_version())
@@ -359,6 +383,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_migrate()
     if args.command == "load":
         return run_load(args)
+    if args.command in COMMAND_LAYERS:
+        return run_analysis_command(args)
     if args.command == "accessibility":
         return run_accessibility_command(args)
     if args.command == "rasp-download":

@@ -165,19 +165,22 @@ def suggest_links(
     limit: int,
 ) -> tuple[float, list[LinkProposal]]:
     """Rank distinct city pairs by the slower reachable direction per kilometre."""
-    speed_km_sec = fmean(
+    speeds = [
         distance / float(weight)
         for source, neighbours in graph.items()
         for target, weight in neighbours.items()
-        if (distance := distances_km[tuple(sorted((source, target)))]) > 0
-    )
+        if (distance := distances_km.get(tuple(sorted((source, target))), 0)) > 0
+    ]
+    if not speeds or limit <= 0:
+        return 0.0, []
+    speed_km_sec = fmean(speeds)
     ranked = sorted(
         (
             (float(duration) / distance, source, target, distance, duration)
             for source, times in baseline.items()
             for target, duration in times.items()
             if source != target
-            if (distance := distances_km[tuple(sorted((source, target)))]) > 0
+            if (distance := distances_km.get(tuple(sorted((source, target))), 0)) > 0
         ),
         key=lambda row: (-row[0], row[1], row[2]),
     )
