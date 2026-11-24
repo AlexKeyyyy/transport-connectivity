@@ -4,7 +4,7 @@
 от 24 ноября 2026 года. Вход — успешная нормализация снимка «Если быть точным»
 `tochno_intercity_v20260629`, 180 вершин и 96 660 измерений. Код прореживания
 взят из [закреплённого коммита PR #40](https://github.com/AlexKeyyyy/transport-connectivity/commit/c0117c7990bac37da1124a9666d26e5e786418f5).
-Скрипт сверяет SHA-256 обоих нормализованных файлов по отчёту и хеш `graph.py`.
+Эта версия `graph.py` влита в `develop` коммитом `e1cec08`. Скрипт сверяет SHA-256 обоих нормализованных файлов по отчёту и хеш `graph.py`.
 
 ## Методика
 
@@ -117,22 +117,19 @@
 Для инженерной оценки конкретной связи понадобятся маршрут, вид транспорта и
 проверенное время поездки.
 
-## Воспроизведение до слияния PR #40
+## Воспроизведение
 
-Из корня ветки #35 в PowerShell. Нормализованный снимок получают командами
-`download` и `process` из [инструкции по данным](../data/README.md).
-Передайте путь к нему и используйте Python 3.12+ с установленным пакетом.
-Временный worktree содержит ровно закреплённый `graph.py`; скрипт #35 и
-результаты остаются локальными.
+Из корня ветки #35 в окружении Python 3.12+:
 
 ```powershell
-git fetch origin
-git worktree add --detach ../transport-graph35 c0117c7990bac37da1124a9666d26e5e786418f5
-$graphWorktree = (Resolve-Path ../transport-graph35).Path
-Copy-Item src/transport_connectivity/resilience.py "$graphWorktree/src/transport_connectivity/"
-$env:PYTHONPATH = "$graphWorktree/src"
+python -m pip install -e ".[dev]"
+python -m transport_connectivity.cli download
+python -m transport_connectivity.cli process
 python scripts/data/resilience_report.py --snapshot data/normalized/tochno_intercity_v20260629 --output data/normalized/resilience-35.json --rank-removals
 ```
+
+Если успешная нормализация уже есть, передайте её каталог через `--snapshot`.
+Модуль `graph.py` в `develop` совпадает с закреплённой версией вплоть до байтов.
 
 Полный прогон на Python 3.12.3 и Windows 11 Pro, Intel Core i5-12400F,
 занял 47,243 с, пиковый рабочий набор процесса 153,02 МиБ. Замер выполнен
@@ -141,6 +138,9 @@ SHA-256 исходного CSV
 `aed8463339b988a7c9ac81aa976a4fc25c152e4066b551d25cbdcc16ebe16d53`,
 нормализованных измерений
 `719f0d87035242548b72ee0764b9c7f4ddd35a077af708ecfec8bba04d2248e6`.
+
+Два полных прогона дали одинаковый JSON. SHA-256:
+`552c2671d9e50f6212ae4df82a9131b02c1c6ae2ef5772fd7aa3fdc0f76d1a0f`.
 
 ## Условия полной приёмки
 
