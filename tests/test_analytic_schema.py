@@ -116,6 +116,36 @@ def test_0004_applies_on_clean_schema_and_migrate_is_idempotent() -> None:
     assert run_migrations() == []
 
 
+def test_graph_snapshot_input_rejects_run_from_another_snapshot() -> None:
+    run_migrations()
+    prefix = f"t32_input_{uuid.uuid4().hex[:8]}"
+    with psycopg.connect(get_connection_string()) as conn:
+        with conn.cursor() as cur:
+            try:
+                snapshot_a, run_a, _, _ = _setup_fixture_cities(cur, f"{prefix}_a")
+                _, run_b, _, _ = _setup_fixture_cities(cur, f"{prefix}_b")
+                cur.execute(
+                    """
+                    INSERT INTO graph_snapshot (
+                        methodology_version, parameters, is_directed, status, code_commit
+                    )
+                    VALUES ('v1', '{}'::jsonb, true, 'building', 'test')
+                    RETURNING graph_snapshot_id;
+                    """
+                )
+                graph_id = cur.fetchone()[0]
+                insert_input = """
+                    INSERT INTO graph_snapshot_input (graph_snapshot_id, snapshot_id, load_run_id)
+                    VALUES (%s, %s, %s)
+                """
+                with pytest.raises(errors.ForeignKeyViolation) as error, conn.transaction():
+                    cur.execute(insert_input, (graph_id, snapshot_a, run_b))
+                assert error.value.diag.constraint_name == "fk_graph_snapshot_input_load_run"
+                cur.execute(insert_input, (graph_id, snapshot_a, run_a))
+            finally:
+                conn.rollback()
+
+
 def test_graph_edge_rejects_node_from_another_version() -> None:
     """An edge cannot reference a city that is only a node in another graph_snapshot."""
     run_migrations()

@@ -8,11 +8,16 @@ CREATE TABLE IF NOT EXISTS graph_snapshot (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE load_run
+    ADD CONSTRAINT uq_load_run_snapshot_run UNIQUE (snapshot_id, load_run_id);
+
 CREATE TABLE IF NOT EXISTS graph_snapshot_input (
     graph_snapshot_id UUID NOT NULL REFERENCES graph_snapshot(graph_snapshot_id) ON DELETE CASCADE,
     snapshot_id TEXT NOT NULL REFERENCES data_snapshot(snapshot_id),
-    load_run_id UUID NOT NULL REFERENCES load_run(load_run_id),
-    PRIMARY KEY (graph_snapshot_id, snapshot_id)
+    load_run_id UUID NOT NULL,
+    PRIMARY KEY (graph_snapshot_id, snapshot_id),
+    CONSTRAINT fk_graph_snapshot_input_load_run
+        FOREIGN KEY (snapshot_id, load_run_id) REFERENCES load_run(snapshot_id, load_run_id)
 );
 
 CREATE TABLE IF NOT EXISTS graph_node (
@@ -68,7 +73,8 @@ CREATE TABLE IF NOT EXISTS metric_result (
     UNIQUE NULLS NOT DISTINCT (analysis_run_id, metric, city_id, other_city_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_graph_snapshot_input_snapshot ON graph_snapshot_input(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_graph_snapshot_input_snapshot_run
+    ON graph_snapshot_input(snapshot_id, load_run_id);
 CREATE INDEX IF NOT EXISTS idx_graph_snapshot_input_load_run ON graph_snapshot_input(load_run_id);
 
 CREATE INDEX IF NOT EXISTS idx_graph_node_city ON graph_node(city_id);
