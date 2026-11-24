@@ -345,11 +345,13 @@ def run_analysis(
         conn.isolation_level = psycopg.IsolationLevel.READ_COMMITTED
         with conn.cursor() as cur:
             versions = _versions(cur, command, snapshot_id, graph_id)
+            # Keep Neo4j native node IDs stable until GDS has read the scores.
+            lock_scope = "export-graph" if command == "key-nodes" else command
             for version in versions:
                 # Acquire locks in graph UUID order even when one command spans several versions.
                 cur.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                    (f"transport_connectivity:{command}:{version.graph_id}",),
+                    (f"transport_connectivity:{lock_scope}:{version.graph_id}",),
                 )
                 if command == "key-nodes":
                     params = version.parameters()
