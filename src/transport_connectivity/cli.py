@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import io
 import json
 import os
@@ -15,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import UUID
 
+from elasticsearch import ApiError, Elasticsearch, TransportError
 from psycopg import Error as DatabaseError
 
 from transport_connectivity.air_resilience import analyze_air_resilience
@@ -48,6 +50,7 @@ from transport_connectivity.rasp_connector import (
     snapshot_dir,
 )
 from transport_connectivity.rasp_processing import process_rasp_snapshot
+from transport_connectivity.search import CITY_INDEX, city_document, rebuild_city_index
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
@@ -219,6 +222,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Directory with direct_links.csv and its run-report.json (default: by date).",
     )
+
+    index_cities_parser = subparsers.add_parser(
+        "index-cities",
+        help="Пересоздать индекс cities_v1 и загрузить все города из cities.csv.",
+    )
+    index_cities_parser.add_argument(
+        "--cities-csv",
+        type=Path,
+        default=Path("data/normalized/tochno_intercity_v20260629/cities.csv"),
+        help="Путь к cities.csv (default: %(default)s).",
+    )
+
     return parser
 
 
@@ -409,6 +424,20 @@ def run_rasp_air_resilience(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_index_cities(args: argparse.Namespace) -> int:
+    url = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
+    try:
+        with args.cities_csv.open(encoding="utf-8", newline="") as file:
+            documents = [city_document(row) for row in csv.DictReader(file)]
+        with Elasticsearch(url) as client:
+            count = rebuild_city_index(client, documents)
+    except (OSError, KeyError, ValueError, ApiError, TransportError, RuntimeError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(f"проиндексировано {count} городов в индекс {CITY_INDEX}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     # JSON is printed with Cyrillic as is; the Windows console default (cp1251) garbles it.
@@ -436,6 +465,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_export_graph(args)
     if args.command == "rasp-air-resilience":
         return run_rasp_air_resilience(args)
+    if args.command == "index-cities":
+        return run_index_cities(args)
     raise AssertionError(f"unhandled command {args.command}")
 
 

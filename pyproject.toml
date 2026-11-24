@@ -17,6 +17,7 @@ classifiers = [
 ]
 dependencies = [
   "psycopg[binary]==3.2.3",
+  "elasticsearch==8.19.0",
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,7 @@ addopts = "-q"
 markers = [
   "db: requires a dedicated PostgreSQL/PostGIS test database",
   "neo4j: requires a dedicated Neo4j test database",
+  "es: requires Elasticsearch and the full normalized city snapshot",
 ]
 
 [tool.ruff]
