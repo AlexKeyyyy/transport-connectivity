@@ -95,7 +95,7 @@ def best_transport_types(measurements: Iterable[TimedMeasurement]) -> dict[Pair,
 def prune(times: Mapping[Pair, Decimal], alpha: Decimal) -> set[Pair]:
     """Edges that stay after thinning.
 
-    Edge A->B is removed if some city C (C != A, C != B) has
+    Edge A->B is removed if some city C (C != A, C != B; both ends are excluded) has
     ``t(A,C) + t(C,B) <= (1 + alpha) * t(A,B)``. ``t`` is always the full matrix ``times``,
     never the already thinned graph, so the result does not depend on the order of checks.
     Equality removes the edge. Iterate over the returned set with ``sorted()`` when a stable
@@ -113,7 +113,7 @@ def prune(times: Mapping[Pair, Decimal], alpha: Decimal) -> set[Pair]:
         limit = factor * time
         detour_exists = False
         for via, first_leg in outgoing.get(source, {}).items():
-            if via == target:
+            if via == source or via == target:
                 continue
             second_leg = outgoing.get(via, {}).get(target)
             if second_leg is not None and first_leg + second_leg <= limit:

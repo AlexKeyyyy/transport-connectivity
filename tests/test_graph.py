@@ -89,6 +89,14 @@ def test_self_via_is_not_a_detour() -> None:
     assert prune({("A", "B"): D(10)}, D("0.2")) == {("A", "B")}
 
 
+def test_both_ends_are_not_detour_candidates() -> None:
+    # Self-pairs with zero time would turn A or B into a "detour" of the edge itself:
+    # t(A,A) + t(A,B) == t(A,B) and t(A,B) + t(B,B) == t(A,B). Neither end may count.
+    times = {("A", "B"): D(100), ("A", "A"): D(0), ("B", "B"): D(0)}
+    assert ("A", "B") in prune(times, D(0))
+    assert ("A", "B") in prune(times, D("0.2"))
+
+
 def test_negative_alpha_rejected() -> None:
     with pytest.raises(ValueError):
         prune({("A", "B"): D(10)}, D("-0.1"))
