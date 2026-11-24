@@ -154,6 +154,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="ID of the loaded snapshot (default: %(default)s).",
     )
 
+    access.add_argument(
+        "--include-air", action="store_true", help="Also publish the map's standalone air layer."
+    )
+
     rasp = subparsers.add_parser(
         "rasp-download",
         help="Collect or continue collecting direct trains and flights from Yandex Rasp.",
@@ -350,7 +354,9 @@ def run_analysis_command(args: argparse.Namespace) -> int:
 
 def run_accessibility_command(args: argparse.Namespace) -> int:
     try:
-        report = run_accessibility(args.snapshot_id, code_version=current_code_version())
+        report = run_accessibility(
+            args.snapshot_id, code_version=current_code_version(), include_air=args.include_air
+        )
     except (DatabaseError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1

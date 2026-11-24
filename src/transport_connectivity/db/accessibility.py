@@ -197,12 +197,13 @@ def _half_day_summary(cur: psycopg.Cursor, run_id: UUID, cities: dict[str, City]
     }
 
 
-def run_accessibility(snapshot_id: str, *, code_version: str) -> dict:
+def run_accessibility(snapshot_id: str, *, code_version: str, include_air: bool = False) -> dict:
     """Publish each run once and return the six-hour summary from stored metrics."""
     thresholds = (None, *THRESHOLDS_SEC.values())
+    layers = (*LAYERS, "air") if include_air else LAYERS
     planned = [
         MatrixRun(TRAVEL_TIMES if seconds is None else ACCESSIBILITY, layer, seconds)
-        for layer in LAYERS
+        for layer in layers
         for seconds in thresholds
     ]
     with psycopg.connect(get_connection_string()) as conn:
@@ -220,11 +221,17 @@ def run_accessibility(snapshot_id: str, *, code_version: str) -> dict:
             pending = [run for run in planned if run not in ready]
             if pending:
                 measurements = _read_measurements(cur, snapshot_id, cities)
-                for layer in LAYERS:
+                for layer in layers:
                     layer_runs = [run for run in pending if run.layer == layer]
                     if not layer_runs:
                         continue
-                    times = layer_times(measurements, layer)
+                    if layer == "air":
+                        # Reuse the same flight adjustment as the combined layer.
+                        times = layer_times(
+                            (item for item in measurements if item.transport_type == "air"), "best"
+                        )
+                    else:
+                        times = layer_times(measurements, layer)
                     for run in layer_runs:
                         ready[run] = _publish_run(
                             cur,
