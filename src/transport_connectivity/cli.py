@@ -10,8 +10,13 @@ import os
 import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import asdict
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from uuid import UUID
+
+from psycopg import Error as DatabaseError
 
 from elasticsearch import Elasticsearch
 
@@ -22,15 +27,19 @@ from transport_connectivity.connector import (
     ConnectorError,
     fetch_full_dataset,
 )
+from transport_connectivity.db.accessibility import DEFAULT_SNAPSHOT_ID, run_accessibility
+from transport_connectivity.db.graph import ALL_VERSIONS, build_graphs
 from transport_connectivity.db.load import (
     DEFAULT_NORMALIZED_DIR,
     load_snapshot,
 )
+from transport_connectivity.db.resilience import COMMAND_LAYERS, run_analysis
 from transport_connectivity.processor import (
     DEFAULT_OUTPUT_ROOT,
     ProcessingError,
     process_snapshot,
 )
+from transport_connectivity.projection import export_graphs
 from transport_connectivity.rasp_connector import (
     DEFAULT_CITIES_PATH,
     DEFAULT_QUOTA_PATH,
@@ -106,6 +115,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run pending PostgreSQL database migrations.",
     )
 
+    graph = subparsers.add_parser("build-graph", help="Build ready graph versions in PostgreSQL.")
+    selector = graph.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--all", action="store_true", help="Build all nine versions.")
+    selector.add_argument("--layer", choices=("road", "rail", "best"))
+    graph.add_argument("--alpha", help="Pruning tolerance: 0.05, 0.10 or 0.20.")
+    graph.add_argument("--snapshot-id", default=DEFAULT_SNAPSHOT_ID)
+
     load = subparsers.add_parser(
         "load",
         help="Load normalized snapshot data into PostgreSQL.",
@@ -121,6 +137,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_NORMALIZED_DIR,
         help="Directory containing run-report.json and CSVs (default: %(default)s).",
+    )
+
+    analysis_help = {
+        "key-nodes": "Calculate weighted betweenness in GDS and store it in PostgreSQL.",
+        "node-removal": "Rank cities by removal impact and store the Moscow scenario.",
+        "link-scenarios": "Store the high-speed rail and suggested-link scenarios.",
+    }
+    for command, help_text in analysis_help.items():
+        analysis = subparsers.add_parser(command, help=help_text)
+        analysis.add_argument("--snapshot-id", default=DEFAULT_SNAPSHOT_ID)
+        analysis.add_argument("--graph-snapshot", type=UUID, help="Run only this ready graph UUID.")
+
+    access = subparsers.add_parser(
+        "accessibility",
+        help="Compute and store threshold accessibility and travel times in PostgreSQL.",
+    )
+    access.add_argument(
+        "--snapshot-id",
+        default=DEFAULT_SNAPSHOT_ID,
+        help="ID of the loaded snapshot (default: %(default)s).",
     )
 
     rasp = subparsers.add_parser(
@@ -168,6 +204,11 @@ def build_parser() -> argparse.ArgumentParser:
     rasp_process.add_argument("--cities", type=Path, default=DEFAULT_CITIES_PATH)
     rasp_process.add_argument("--raw-root", type=Path, default=DEFAULT_RAW_ROOT)
     rasp_process.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+
+    export = subparsers.add_parser("export-graph", help="Export ready PostgreSQL graphs to Neo4j.")
+    export_selection = export.add_mutually_exclusive_group(required=True)
+    export_selection.add_argument("--all-ready", action="store_true")
+    export_selection.add_argument("--graph-snapshot", type=UUID)
 
     air_resilience = subparsers.add_parser(
         "rasp-air-resilience",
@@ -269,6 +310,19 @@ def run_migrate() -> int:
     return 0
 
 
+def run_build_graph(args: argparse.Namespace) -> int:
+    try:
+        if args.all and args.alpha is not None:
+            raise ValueError("Use --all or --layer with --alpha")
+        versions = ALL_VERSIONS if args.all else ((args.layer, Decimal(args.alpha or "NaN")),)
+        result = build_graphs(args.snapshot_id, versions, code_commit=current_code_version())
+    except (DatabaseError, InvalidOperation, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps([asdict(row) for row in result], indent=2, default=str))
+    return 0
+
+
 def run_load(args: argparse.Namespace) -> int:
     try:
         result = load_snapshot(
@@ -284,6 +338,28 @@ def run_load(args: argparse.Namespace) -> int:
     print(f"Loaded snapshot '{result.snapshot_id}':")
     for table, count in result.counts.items():
         print(f"  {table}: {count}")
+    return 0
+
+
+def run_analysis_command(args: argparse.Namespace) -> int:
+    try:
+        report = run_analysis(
+            args.command, args.snapshot_id, args.graph_snapshot, code_commit=current_code_version()
+        )
+    except (DatabaseError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def run_accessibility_command(args: argparse.Namespace) -> int:
+    try:
+        report = run_accessibility(args.snapshot_id, code_version=current_code_version())
+    except (DatabaseError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     return 0
 
 
@@ -326,6 +402,16 @@ def run_rasp_process(args: argparse.Namespace) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def run_export_graph(args: argparse.Namespace) -> int:
+    try:
+        result = export_graphs(args.graph_snapshot)
+    except (DatabaseError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps([asdict(row) for row in result], indent=2, default=str))
     return 0
 
 
@@ -382,12 +468,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_process(args)
     if args.command == "migrate":
         return run_migrate()
+    if args.command == "build-graph":
+        return run_build_graph(args)
     if args.command == "load":
         return run_load(args)
+    if args.command in COMMAND_LAYERS:
+        return run_analysis_command(args)
+    if args.command == "accessibility":
+        return run_accessibility_command(args)
     if args.command == "rasp-download":
         return run_rasp_download(args)
     if args.command == "rasp-process":
         return run_rasp_process(args)
+    if args.command == "export-graph":
+        return run_export_graph(args)
     if args.command == "rasp-air-resilience":
         return run_rasp_air_resilience(args)
     if args.command == "index-cities":
