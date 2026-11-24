@@ -147,7 +147,7 @@ python -m streamlit run src/transport_connectivity/app/map_app.py -- --source of
 | `release/<version>` | `develop` | `main`, затем `develop` | Подготовка выпуска |
 | `hotfix/<issue>-<short>` | `main` | `main` и `develop` | Срочное исправление выпуска |
 
-Задача проходит проверки, рецензирование и squash merge через PR. Правила
-проекта описаны в [AGENTS.md](AGENTS.md), рабочий цикл — в [документации
-harness](docs/harness.md). PDF планируем отправить 28–29 ноября. Финальная
-защита — 4 декабря 2026 года.
+Задача проходит проверки, рецензирование и squash merge через PR.
+[Правила разработки и проверки](docs/contributing.md)
+
+PDF планируем отправить 28–29 ноября. Финальная защита — 4 декабря 2026 года.
