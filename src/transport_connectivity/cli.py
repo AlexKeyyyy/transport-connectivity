@@ -13,6 +13,7 @@ from dataclasses import asdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from uuid import UUID
 
 from psycopg import Error as DatabaseError
 
@@ -34,6 +35,7 @@ from transport_connectivity.processor import (
     ProcessingError,
     process_snapshot,
 )
+from transport_connectivity.projection import export_graphs
 from transport_connectivity.rasp_connector import (
     DEFAULT_CITIES_PATH,
     DEFAULT_QUOTA_PATH,
@@ -183,6 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
     rasp_process.add_argument("--cities", type=Path, default=DEFAULT_CITIES_PATH)
     rasp_process.add_argument("--raw-root", type=Path, default=DEFAULT_RAW_ROOT)
     rasp_process.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+
+    export = subparsers.add_parser("export-graph", help="Export ready PostgreSQL graphs to Neo4j.")
+    export_selection = export.add_mutually_exclusive_group(required=True)
+    export_selection.add_argument("--all-ready", action="store_true")
+    export_selection.add_argument("--graph-snapshot", type=UUID)
 
     air_resilience = subparsers.add_parser(
         "rasp-air-resilience",
@@ -355,6 +362,16 @@ def run_rasp_process(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_export_graph(args: argparse.Namespace) -> int:
+    try:
+        result = export_graphs(args.graph_snapshot)
+    except (DatabaseError, ValueError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    print(json.dumps([asdict(row) for row in result], indent=2, default=str))
+    return 0
+
+
 def run_rasp_air_resilience(args: argparse.Namespace) -> int:
     try:
         report = analyze_air_resilience(
@@ -390,6 +407,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return run_rasp_download(args)
     if args.command == "rasp-process":
         return run_rasp_process(args)
+    if args.command == "export-graph":
+        return run_export_graph(args)
     if args.command == "rasp-air-resilience":
         return run_rasp_air_resilience(args)
     raise AssertionError(f"unhandled command {args.command}")
