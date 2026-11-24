@@ -41,6 +41,7 @@ addopts = "-q"
 markers = [
   "db: requires a dedicated PostgreSQL/PostGIS test database",
   "neo4j: requires a dedicated Neo4j test database",
+  "es: requires Elasticsearch and the full normalized city snapshot",
 ]
 
 [tool.ruff]

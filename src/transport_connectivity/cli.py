@@ -16,9 +16,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import UUID
 
+from elasticsearch import ApiError, Elasticsearch, TransportError
 from psycopg import Error as DatabaseError
-
-from elasticsearch import Elasticsearch
 
 from transport_connectivity.air_resilience import analyze_air_resilience
 from transport_connectivity.connector import (
@@ -51,11 +50,7 @@ from transport_connectivity.rasp_connector import (
     snapshot_dir,
 )
 from transport_connectivity.rasp_processing import process_rasp_snapshot
-from transport_connectivity.search import (
-    city_document,
-    create_index,
-    index_cities,
-)
+from transport_connectivity.search import CITY_INDEX, city_document, rebuild_city_index
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 
@@ -430,30 +425,16 @@ def run_rasp_air_resilience(args: argparse.Namespace) -> int:
 
 
 def run_index_cities(args: argparse.Namespace) -> int:
-    es_url = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
-    client = Elasticsearch(es_url)
-
+    url = os.environ.get("ELASTICSEARCH_URL", "http://localhost:9200")
     try:
-        with open(args.cities_csv, encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            documents = [city_document(row) for row in reader]
-    except OSError as error:
-        print(f"error: cannot read {args.cities_csv}: {error}", file=sys.stderr)
-        return 1
-
-    try:
-        create_index(client, "cities_v1")
-        index_cities(client, "cities_v1", documents)
-
-        # Пересоздаем алиас cities -> cities_v1
-        client.indices.delete_alias(name="cities", index="*", ignore_unavailable=True)
-        client.indices.put_alias(index="cities_v1", name="cities")
-
-        print(f"проиндексировано {len(documents)} городов в индекс cities_v1")
-    except Exception as error:
+        with args.cities_csv.open(encoding="utf-8", newline="") as file:
+            documents = [city_document(row) for row in csv.DictReader(file)]
+        with Elasticsearch(url) as client:
+            count = rebuild_city_index(client, documents)
+    except (OSError, KeyError, ValueError, ApiError, TransportError, RuntimeError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
-
+    print(f"проиндексировано {count} городов в индекс {CITY_INDEX}")
     return 0
 
 

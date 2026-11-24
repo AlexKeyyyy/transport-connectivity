@@ -190,3 +190,15 @@ WHERE id_namespace = 'sber_territory' AND external_id = '953';
 Для интеграционных тестов задайте `RUN_DB_TESTS=1` и `POSTGRES_HOST` вместе
 с остальными параметрами `POSTGRES_*` отдельной тестовой базы.
 Команда запуска: `python -m pytest -m db -v`.
+
+## Поиск городов
+
+После `download` и `process` выполните из корня репозитория:
+
+```bash
+docker compose up -d --wait elasticsearch
+python -m transport_connectivity.cli index-cities
+```
+
+Команда читает `data/normalized/tochno_intercity_v20260629/cities.csv` и
+создаёт индекс поиска по 180 городам. См. [настройку и проверки](../docs/elasticsearch.md).

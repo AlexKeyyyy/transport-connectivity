@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
+
+CITY_INDEX = "cities_v1"
+CITY_ALIAS = "cities"
 
 # Settings и mappings в точности из docs/elasticsearch.md
 INDEX_SETTINGS: dict[str, Any] = {
@@ -84,10 +88,13 @@ def city_document(row: dict[str, Any]) -> dict[str, Any]:
         doc["population"] = int(population)
 
     # location: объект {lat, lon} или отсутствует
-    lat = row.get("lat")
-    lon = row.get("lon")
+    lat = row.get("latitude", row.get("lat"))
+    lon = row.get("longitude", row.get("lon"))
     if lat is not None and lon is not None and str(lat).strip() != "" and str(lon).strip() != "":
-        doc["location"] = {"lat": float(lat), "lon": float(lon)}
+        latitude, longitude = float(lat), float(lon)
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            raise ValueError(f"Координаты вне диапазона для города {doc['city_id']}")
+        doc["location"] = {"lat": latitude, "lon": longitude}
 
     return doc
 
@@ -120,6 +127,45 @@ def index_cities(client: Elasticsearch, name: str, documents: list[dict[str, Any
         raise RuntimeError(
             f"Не удалось проиндексировать {len(failed)} документ(ов):\n" + "\n".join(error_details)
         )
+    if success != len(documents):
+        raise RuntimeError(f"Elasticsearch загрузил {success} документов из {len(documents)}")
+
+
+def rebuild_city_index(
+    client: Elasticsearch,
+    documents: list[dict[str, Any]],
+    *,
+    index: str = CITY_INDEX,
+    alias: str = CITY_ALIAS,
+) -> int:
+    """Пересобирает индекс и направляет псевдоним на проверенный результат."""
+    expected = len(documents)
+    city_ids = {UUID(document["city_id"]) for document in documents}
+    if not expected or len(city_ids) != expected:
+        raise ValueError("Нужен непустой список городов с уникальными city_id")
+    create_index(client, index)
+    index_cities(client, index, documents)
+    actual = client.count(index=index)["count"]
+    if actual != expected:
+        raise RuntimeError(f"В индексе {index} найдено {actual} документов вместо {expected}")
+
+    previous = client.options(ignore_status=404).indices.get_alias(name=alias)
+    actions = []
+    if previous.meta.status != 404:
+        actions.extend(
+            {"remove": {"index": old, "alias": alias, "must_exist": True}}
+            for old in previous
+            if old != index
+        )
+    actions.append({"add": {"index": index, "alias": alias}})
+    response = client.indices.update_aliases(actions=actions)
+    if (
+        not response["acknowledged"]
+        or response.get("errors")
+        or set(client.indices.get_alias(name=alias)) != {index}
+    ):
+        raise RuntimeError(f"Не удалось направить псевдоним {alias} на индекс {index}")
+    return actual
 
 
 def search_cities(
@@ -127,10 +173,13 @@ def search_cities(
     text: str,
     region: str | None = None,
     limit: int = 10,
+    *,
+    alias: str = CITY_ALIAS,
 ) -> list[dict[str, Any]]:
     """Поиск городов по тексту (точное, префикс, опечатка) с опциональным фильтром по региону.
 
     Возвращает список словарей с city_id, name, region, score.
+    Например, search_cities(client, "Брянкс", limit=5) ищет Брянск через алиас.
     """
     must: list[dict[str, Any]] = []
 
@@ -159,7 +208,7 @@ def search_cities(
         "_source": ["city_id", "name", "region"],
     }
 
-    response = client.search(index="cities", body=body)
+    response = client.search(index=alias, body=body)
     return [
         {
             "city_id": hit["_source"]["city_id"],
@@ -177,10 +226,13 @@ def cities_near(
     lon: float,
     radius_km: float,
     limit: int = 20,
+    *,
+    alias: str = CITY_ALIAS,
 ) -> list[dict[str, Any]]:
     """Поиск городов в радиусе radius_km от точки, сортировка по расстоянию.
 
     Возвращает список словарей с city_id, name, region, distance_km.
+    Например, cities_near(client, 55.7540584, 37.62049, 25) ищет города рядом с Москвой.
     """
     body = {
         "size": limit,
@@ -206,7 +258,7 @@ def cities_near(
         "_source": ["city_id", "name", "region"],
     }
 
-    response = client.search(index="cities", body=body)
+    response = client.search(index=alias, body=body)
     results = []
     for hit in response["hits"]["hits"]:
         distance = hit["sort"][0] if "sort" in hit else None

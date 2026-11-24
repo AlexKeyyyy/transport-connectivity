@@ -1,24 +1,38 @@
 """Тесты city_document и INDEX_SETTINGS без Elasticsearch."""
 
+import pytest
+
 from transport_connectivity.search import INDEX_SETTINGS, city_document
 
 
 def test_city_document_with_location_and_population():
     row = {
-        "city_id": "953",
+        "city_id": "83c80e94-954a-5182-b2dd-a4aa219e6400",
         "name": "Брянск",
         "region": "Брянская область",
         "population": "400000",
-        "lat": "53.2420053",
-        "lon": "34.3653002",
+        "latitude": "53.2420053",
+        "longitude": "34.3653002",
     }
     doc = city_document(row)
-    assert doc["city_id"] == "953"
+    assert doc["city_id"] == "83c80e94-954a-5182-b2dd-a4aa219e6400"
     assert doc["name"] == "Брянск"
     assert doc["aliases"] == []
     assert doc["region"] == "Брянская область"
     assert doc["population"] == 400000
     assert doc["location"] == {"lat": 53.2420053, "lon": 34.3653002}
+
+
+def test_city_document_rejects_out_of_range_coordinates():
+    row = {
+        "city_id": "83c80e94-954a-5182-b2dd-a4aa219e6400",
+        "name": "Брянск",
+        "region": "Брянская область",
+        "latitude": "91",
+        "longitude": "34.3653002",
+    }
+    with pytest.raises(ValueError, match="Координаты вне диапазона"):
+        city_document(row)
 
 
 def test_city_document_without_coordinates():
