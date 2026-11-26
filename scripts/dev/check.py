@@ -15,7 +15,7 @@ def main() -> int:
         return 2
     root = Path(__file__).resolve().parents[2]
     commands = [
-        [sys.executable, "scripts/dev/check_harness.py"],
+        [sys.executable, "scripts/dev/check_docs.py"],
         [sys.executable, "-m", "ruff", "check"],
         [sys.executable, "-m", "ruff", "format", "--check"],
         [sys.executable, "-m", "pytest"],

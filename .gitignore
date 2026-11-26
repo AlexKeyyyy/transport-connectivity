@@ -20,6 +20,11 @@ htmlcov/
 .ipynb_checkpoints/
 
 # Secrets and local config
+/AGENTS.md
+/CLAUDE.md
+/.agents/
+/.codex/
+/.claude/
 .env
 *.pem
 *.key
