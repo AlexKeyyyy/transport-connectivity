@@ -123,7 +123,7 @@ python -m streamlit run src/transport_connectivity/app/map_app.py -- --source of
 | [`docs/`](docs/README.md) | Модель данных, диаграммы, ограничения и план |
 | [`tests/`](tests/) | Проверки преобразований, схемы и карты |
 | [`benchmarks/`](benchmarks/README.md) | Замеры времени и памяти |
-| [`deliverables/`](https://github.com/AlexKeyyyy/transport-connectivity/pull/52) | Отчёты, материалы и доказательства запусков |
+| [`deliverables/`](deliverables/predefense/README.md) | Отчёты, материалы и доказательства запусков |
 
 ### Вклад команды
 
