@@ -1,0 +1,67 @@
+---
+title: Модель данных — граф и расчёты
+---
+erDiagram
+    graph_snapshot ||--|{ graph_snapshot_input : "построен из"
+    data_snapshot ||--o{ graph_snapshot_input : "входит в"
+    load_run ||--o{ graph_snapshot_input : "загрузка"
+    graph_snapshot ||--o{ graph_node : "вершины"
+    city ||--o{ graph_node : "является"
+    graph_node ||--o{ graph_edge : "начало"
+    graph_node ||--o{ graph_edge : "конец"
+    route_measurement |o--o{ graph_edge : "основание"
+    graph_snapshot |o--o{ analysis_run : "анализируется"
+    data_snapshot |o--o{ analysis_run : "матрица снимка"
+    analysis_run ||--o{ metric_result : "даёт"
+    city |o--o{ metric_result : "город"
+    city |o--o{ metric_result : "второй город пары"
+
+    graph_snapshot {
+        uuid graph_snapshot_id PK
+        text methodology_version
+        jsonb parameters
+        boolean is_directed
+        text status "building, ready, failed"
+        text code_commit
+    }
+    graph_snapshot_input {
+        uuid graph_snapshot_id PK, FK
+        text snapshot_id PK, FK
+        uuid load_run_id FK
+    }
+    graph_node {
+        uuid graph_snapshot_id PK, FK
+        uuid city_id PK, FK
+    }
+    graph_edge {
+        uuid graph_edge_id PK
+        uuid graph_snapshot_id FK
+        uuid from_city_id FK
+        uuid to_city_id FK
+        text transport_type
+        numeric weight "> 0, меньше = лучше"
+        text weight_unit "sec, m"
+        uuid measurement_id FK "может быть NULL"
+    }
+    analysis_run {
+        uuid analysis_run_id PK
+        uuid graph_snapshot_id FK "NULL если по снимку"
+        text snapshot_id FK "NULL если по графу"
+        text algorithm
+        text engine "python, neo4j-gds"
+        text engine_version
+        jsonb parameters
+        jsonb scenario "NULL = исходный граф"
+        text code_commit
+        text status "running, ready, failed"
+        timestamptz started_at
+        timestamptz finished_at
+    }
+    metric_result {
+        bigserial metric_result_id PK
+        uuid analysis_run_id FK
+        text metric
+        uuid city_id FK
+        uuid other_city_id FK "для пары городов"
+        numeric value "NULL = не определено"
+    }

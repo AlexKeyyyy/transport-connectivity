@@ -20,6 +20,11 @@ htmlcov/
 .ipynb_checkpoints/
 
 # Secrets and local config
+/AGENTS.md
+/CLAUDE.md
+/.agents/
+/.codex/
+/.claude/
 .env
 *.pem
 *.key
@@ -47,6 +52,10 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+# Normalized snapshots are rebuilt by `process`; only run reports go to Git
+data/normalized/
 # Neo4j / Elasticsearch local state
 neo4j/data/
 elasticsearch/data/
+
+data/normalized/*

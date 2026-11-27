@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ru">
+<meta charset="utf-8">
+<title>Транспортная связность городов России</title>
+<style>
+@page { size: 13.333333in 7.5in; margin: 0; }
+* { box-sizing: border-box; }
+body { margin: 0; color:#182c36; background:#e3e9ee; font-family:"Segoe UI",sans-serif; }
+.slide { width:1280px; height:720px; position:relative; margin:24px auto; padding:52px 72px 66px; background:#fbfcfa; border-top:10px solid #28786b; overflow:hidden; }
+.slide h1 { font-size:52px; font-weight:700; line-height:1.08; margin:0 0 27px; letter-spacing:-.035em; }
+.cover { background:#17393d; color:#fff; padding-top:125px; border-color:#63b09f; }
+.cover h1 { max-width:875px; font-size:78px; line-height:1.04; }
+.cover .lead { color:#cce7de; font-size:34px; }
+.cover-team { margin-top:53px; font-size:25px; }
+.cover-date { color:#cce7de; font-size:21px; }
+p,li {font-size:26px;line-height:1.29;}
+p { margin:12px 0; }
+ul { padding-left:27px; margin:18px 0 0; }
+li { padding-left:6px; margin:9px 0; }
+.lead {font-size:30px;max-width:1030px;}
+.sub {font-size:19px;color:#425861;}
+h3 {font-size:27px;margin:0 0 8px;}
+.grid { display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:46px;margin:22px 0; }
+.fact { border-top:2px solid #9cbfb3;padding-top:10px; }
+.fact strong { display:block; font-size:66px;line-height:1;color:#176457;letter-spacing:-.04em; }
+.fact span {display:block;font-size:23px;margin-top:13px;}
+.takeaway { border-left:4px solid #28786b; padding:4px 0 4px 16px; margin-top:22px;font-weight:600;}
+.flow {display:flex;justify-content:space-between;align-items:center;margin:26px 0;gap:15px;}
+.flow span { padding:10px 16px;background:#e2efeb;color:#234a48;font-size:25px;font-weight:600; text-align:center;}
+.flow b { color:#34786e;font-size:29px; }
+.formula {font-size:37px;color:#176457;font-weight:600;background:#e2efeb;padding:16px 24px;display:inline-block;}
+table { border-collapse:collapse; width:100%;font-size:22px;line-height:1.22;}
+th,td { border-bottom:1px solid #c8d4d8;padding:11px 12px;text-align:left;vertical-align:top;}
+th {background:#e2efeb;color:#234a48;font-weight:650;}
+td:first-child {font-weight:600;}
+a {color:#125c58;text-decoration:underline;}
+footer {position:absolute;bottom:23px;left:72px;right:72px;display:flex;justify-content:space-between;color:#48616a;font-size:16px;border-top:1px solid #c8d4d8;padding-top:9px;}
+.air .grid {grid-template-columns:1.1fr 1fr;gap:54px;margin:0;}
+.air .grid p {font-size:22px;}
+.air .grid p.air-hit {color:#176457;font-size:51px;font-weight:750;margin:2px 0 8px;}
+.bars {font-size:21px;}
+.bars div {display:flex;justify-content:space-between;}
+.bars i {height:16px;background:#277a6c;display:block;margin:6px 0 12px;}
+.bars i:last-child {background:#b66649;}
+.map-layout {display:grid;grid-template-columns:max-content 1fr;gap:40px;align-items:start;}
+.map-layout img {width:auto;height:464px;max-width:800px;object-fit:contain;border:1px solid #cfddde;}
+.map-layout p {font-size:23px;}
+@media print {
+ body { background:#fff; }
+ .slide { margin:0;break-after:page; print-color-adjust:exact;-webkit-print-color-adjust:exact; }
+ .slide:last-child {break-after:auto;}
+}
+</style>
+<section class="slide cover">
+<h1>Транспортная связность городов России</h1>
+<p class="lead">Доступность за заданное время<br>и устойчивость маршрутных связей</p><p class="cover-team">Алексей · Лина · Елисей · Мадина · Ранис</p><p class="cover-date">Финальная защита · 4 декабря 2026 года</p>
+
+</section>
+<section class="slide ">
+<h1>Что измеряем</h1>
+<p class="lead">Городской аналитик выбирает отправление, вид транспорта и порог времени. Карта показывает, куда можно доехать и сколько человек живёт в этих городах.</p><div class="grid"><div><div class="fact"><strong>3, 6, 24</strong><span>часа для оценки доступности</span></div></div><div><div class="fact"><strong>9</strong><span>версий графа для сравнения</span></div></div><div><div class="fact"><strong>2</strong><span>типа сценариев: удаление узла и добавление связи</span></div></div></div><ul><li>Доступность сравниваем по числу городов и сумме их населения.</li><li>Критичность оцениваем по потерянным путям и росту времени.</li></ul>
+<footer><span></span><span>2</span></footer>
+</section>
+<section class="slide ">
+<h1>Два снимка, два вида данных</h1>
+<table><thead><tr><th>Источник</th><th>Вход</th><th>Что измеряет</th></tr></thead><tbody><tr><td>«Если быть точным», 29.06.2026</td><td>96 660 строк × 22 поля, 180 городов, 23,5 МБ</td><td>Время и расстояние для направленных пар, три вида транспорта</td></tr><tr><td>Яндекс Расписания, 01.12.2026</td><td>1 424 сохранённых ответа, 179 сопоставленных городов, 3 482 направленные связи rail и air</td><td>Рейсы между станциями в выбранном окне поездки</td></tr></tbody></table><p class="takeaway">У 32 230 записей матрицы отсутствуют числовые значения. Они сохраняются с исходной причиной пропуска.</p>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/deliverables/interim/evidence/processing-run-1.json">Полный прогон</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/yandex-schedules-plan.md">Сбор расписаний</a></span><span>3</span></footer>
+</section>
+<section class="slide ">
+<h1>Как данные доходят до карты</h1>
+<div class="flow"><span>Снимок</span><b aria-hidden="true">→</b><span>download</span><b aria-hidden="true">→</b><span>CSV + manifest</span><b aria-hidden="true">→</b><span>process</span><b aria-hidden="true">→</b><span>Нормализованные CSV</span></div><div class="grid"><div><h3>В PostgreSQL/PostGIS</h3><p><code>migrate</code> создаёт схему. <code>load</code> проверяет контрольные суммы и записывает снимок в транзакции.</p></div><div><h3>В карту Streamlit</h3><p>В режиме базы карта читает доступность и сценарии, а поиск городов обращается к Elasticsearch.</p></div></div><p class="takeaway">Карта читает рассчитанные показатели из PostgreSQL. Экспорт локального JSON готовит запасной показ.</p>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/architecture.md">Архитектура и поток управления</a></span><span>4</span></footer>
+</section>
+<section class="slide ">
+<h1>Снимок и измерения в PostgreSQL</h1>
+<div class="flow"><span>data_snapshot</span><b aria-hidden="true">→</b><span>load_run</span><b aria-hidden="true">→</b><span>route_measurement</span></div><div class="grid"><div><h3>Город и идентификаторы</h3><p>UUID связывает измерения с двумя городами. Sber ID и ОКТМО хранятся как внешние идентификаторы. Координаты WGS84 используются в PostGIS.</p></div><div><h3>Повторная загрузка</h3><p>В чистой базе перед и после повтора получили те же 180 городов, 360 внешних ID и 96 660 измерений. В базе один снимок и одна запись загрузки.</p></div></div><p class="takeaway">Запись сохраняет направление, вид транспорта, время в секундах и расстояние в метрах.</p>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/data-model.md">Модель данных</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/b4024c9596d0258af40c8e13affb304b83a0c9f3/benchmarks/README.md">Проверка #37</a></span><span>5</span></footer>
+</section>
+<section class="slide ">
+<h1>Из матрицы в направленный граф</h1>
+<p class="lead">Сохраняем ребро A → B, если в полной матрице отсутствует обход через третий город C в пределах допуска.</p><p class="formula">t(A,C) + t(C,B) ≤ (1 + α) × t(A,B)</p><div class="grid"><div><h3>Вес в секундах</h3><p><code>road</code> и <code>rail</code> используют оценку источника. <code>best</code> берёт минимум после добавления 3 часов к времени полёта.</p></div><div><h3>Пример</h3><p>Москва → Орёл: 24 480 с. Через Тулу: 10 440 + 10 440 = 20 880 с. Ребро удаляется при всех трёх α.</p></div></div>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/graph-methodology.md">Методика графа · PR #40</a></span><span>6</span></footer>
+</section>
+<section class="slide ">
+<h1>Прореживание меняет достижимость</h1>
+<table><thead><tr><th>Слой и α</th><th>Рёбра</th><th>Пары матрицы, потерявшие путь</th></tr></thead><tbody><tr><td>best · 0,05</td><td>5 642</td><td>0</td></tr><tr><td>best · 0,10</td><td>3 218</td><td>0</td></tr><tr><td>best · 0,20</td><td>1 350</td><td>2 054</td></tr><tr><td>rail · 0,20</td><td>488</td><td>17 236 из 28 056</td></tr></tbody></table><p class="takeaway">Берём α = 0,05 для основного сравнения. При 0,20 агрессивное прореживание уже разрывает часть путей.</p>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/40">Методика и отчёт PR #40</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/analysis-results.md">Офлайн-прогон #35</a></span><span>7</span></footer>
+</section>
+<section class="slide ">
+<h1>Доступность по матрице времени</h1>
+<div class="grid"><div><div class="fact"><strong>101</strong><span>город из Москвы · 40,84 млн жителей</span></div></div><div><div class="fact"><strong>3</strong><span>города из Магадана · 1,02 млн жителей</span></div></div></div><p class="takeaway">Слой «Лучший из трёх», порог 6 часов. Складываем население достижимых городов, исключая город отправления.</p><p>Чукотский АО, Еврейская АО и Камчатский край входят в пять регионов с наименьшим средним охватом среди городов снимка.</p>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/accessibility.md">Показатели и сводка по 85 регионам</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/53">Расчёт #33</a></span><span>8</span></footer>
+</section>
+<section class="slide ">
+<h1>Хранилище и производные представления</h1>
+<table><thead><tr><th>Компонент</th><th>Что делает</th><th>Контроль в чистом клоне</th></tr></thead><tbody><tr><td>PostgreSQL/PostGIS</td><td>Хранит снимок и результаты расчётов</td><td>96 660 измерений после повторной загрузки</td></tr><tr><td>Neo4j/GDS</td><td>Считает взвешенное посредничество по копиям графов</td><td>9 версий по 180 вершин</td></tr><tr><td>Elasticsearch</td><td>Ищет города по названию, координатам и региону</td><td>180 документов. «Брянкс» находит Брянск</td></tr></tbody></table><p class="takeaway">UUID связывает найденный город с записью в PostgreSQL.</p>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/architecture.md">Архитектура</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/issues/34">#34</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/48">PR #48</a></span><span>9</span></footer>
+</section>
+<section class="slide ">
+<h1>Устойчивость графа из матрицы</h1>
+<p class="sub">Слой best · α = 0,05 · 180 городов · посредничество в GDS, сценарии в Python</p><table><thead><tr><th>Сценарий</th><th>Величина</th><th>Результат</th></tr></thead><tbody><tr><td>Посредничество</td><td>Доля кратчайших путей, 0–1</td><td>Краснодар 0,0863 · Екатеринбург 0,0610 · Казань 0,0598</td></tr><tr><td>Удалить Москву</td><td>Достижимые пары среди остальных</td><td>31 862 → 31 862. Среднее время +0,031%</td></tr><tr><td>Удалить Томск</td><td>Потерянные направленные пары</td><td>356</td></tr><tr><td>Добавить ВСМ, 8 100 с</td><td>Доступное население за 6 ч</td><td>+224 286 из Москвы, +1 115 283 из Санкт-Петербурга</td></tr></tbody></table><p class="takeaway">Посредничество и потеря достижимости отвечают на разные вопросы. Сравнение чувствительности к α вынесено в отчёт.</p>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/issues/35">Эксперимент #35</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/analysis-results.md">Результаты и команда</a> · методика на проверенном коммите</span><span>10</span></footer>
+</section>
+<section class="slide ">
+<h1>Яндекс Расписания: без Москвы</h1>
+<div class="air"><div class="grid"><div><div class="bars" aria-label="Достижимые направленные пары"><div>Исходный граф <b>4 900</b></div><i style="width:100%"></i><div>Без Москвы <b>3 660</b></div><i style="width:74.69%"></i></div><p class="sub">Достижимые пары среди 179 городов, единица — пара</p></div><div><p class="air-hit">−25,3%</p><p>Потеря 1 240 пар. Москва исключена из начальных и конечных точек в обоих вариантах.</p></div></div></div><div class="flow"><span>Абакан</span><b aria-hidden="true">→</b><span>Шереметьево<br>11:00–15:25 МСК</span><b aria-hidden="true">→</b><span>Грозный</span></div><p class="takeaway">Стыковка 4 ч 25 мин проверена по двум рейсам на 1 декабря. Графовый подсчёт проверяет пути по рёбрам.</p>
+<footer><span><a href="https://rasp.yandex.ru/">Данные предоставлены сервисом Яндекс.Расписания</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/deliverables/predefense/yandex-air-resilience.md">Эксперимент #43</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/deliverables/predefense/yandex-air-coverage.md">Покрытие #45</a></span><span>11</span></footer>
+</section>
+<section class="slide">
+<h1>Какие рейсы вошли в авиаграф</h1>
+<div class="grid"><div><h3>Охват городов</h3><p><b>90 из 180</b> имеют аэропорт в справочнике.<br><b>72 из 180</b> имеют наблюдаемую связь.</p><h3>От рейсов к рёбрам</h3><p>1 157 станционных вариантов дали 482 направленные связи между городами.</p></div><div><h3>Пропуски в снимке</h3><p>У <b>465 из 1 609</b> отправлений в сохранённом окне нет подходящего прилёта.</p><p>Для 457 из 465 название рейса указывает на пункт вне набора. Это подсказка, которую сверяют с записью о прилёте.</p></div></div>
+<p class="takeaway">Снимок на 1 декабря 2026 года. Для сравнения со второй датой требуется согласование хранения и обработки ответов API.</p>
+<footer><span><a href="https://rasp.yandex.ru/">Данные предоставлены сервисом Яндекс.Расписания</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/deliverables/predefense/yandex-air-coverage.md">Аудит #45</a></span><span>12</span></footer>
+</section>
+<section class="slide ">
+<h1>Карта достижимости за шесть часов</h1>
+<div class="map-layout"><img src="map-live.jpg" alt="Запуск карты с PostgreSQL. Для Москвы выбран порог 6 часов, справа 101 направление"><div><div class="fact"><strong>101</strong><span>достижимый город</span></div><p>Москва, слой «Лучший из трёх». Список справа показывает оценку времени поездки.</p><p class="sub">Тёмная обводка отмечает города в пределах порога.</p></div></div>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/map.md">Проверка карты</a> · подложка © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a></span><span>13</span></footer>
+</section>
+<section class="slide ">
+<h1>Сценарий показа</h1>
+<div class="map-layout"><img src="map-vsm.jpg" alt="Сценарий ВСМ. Подсказка для Москвы показывает прирост охвата на 224 286 жителей"><div><div class="fact"><strong>+224 286</strong><span>жителей в шестичасовом охвате Москвы</span></div><p>Список справа сохраняет времена исходной сети.</p><p>Вернуться к исходной сети. Ввести «Брянкс» → Брянск.</p><p class="sub">Резерв · локальный JSON и скриншоты на слайдах 13–14.</p></div></div>
+<footer><span><a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/map.md">Запуск карты</a> · <a href="https://github.com/AlexKeyyyy/transport-connectivity/pull/50">Инструкция #37</a></span><span>14</span></footer>
+</section>
+<section class="slide ">
+<h1>Время выполнения и пределы модели</h1>
+<table><thead><tr><th>Этап</th><th>Время, с</th><th>Пик Python, МиБ</th></tr></thead><tbody><tr><td>Нормализация, 96 660 строк</td><td>25,215</td><td>622,52</td></tr><tr><td>Первая загрузка в БД</td><td>2,875</td><td>69,10</td></tr><tr><td>Построение девяти графов</td><td>4,378</td><td>172,12</td></tr><tr><td>Посредничество, 9 версий</td><td>4,713</td><td>140,70</td></tr><tr><td>Сценарии удаления узлов</td><td>61,206</td><td>76,59</td></tr></tbody></table><p class="sub">По одному прогону · Windows 11 Pro · i5-12400F · 31,84 ГиБ · Python 3.12.3 · 25 ноября 2026 года</p><p class="takeaway">24 одинаковых сценария на одной машине. Медиана трёх прогонов с одним процессом — 4,15 с, с двумя — 2,38 с. Результаты совпали.</p><p class="sub">При переносе на разные узлы отдельно измеряем передачу графа и ожидание блоков. Число направленных пар растёт как N(N − 1).</p>
+<footer><span>Замеры <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/b4024c9596d0258af40c8e13affb304b83a0c9f3/benchmarks/README.md">#37</a> и <a href="https://github.com/AlexKeyyyy/transport-connectivity/blob/67d7c23e656682306754dddd1b7272f40130706e/docs/analysis-results.md">#35</a></span><span>15</span></footer>
+</section>
+<section class="slide ">
+<h1>Исследования и источники</h1>
+<table><thead><tr><th>Работа</th><th>Что использовали</th></tr></thead><tbody><tr><td><a href="https://doi.org/10.1080/01944365908978307">Hansen, 1959</a></td><td>Доступность как возможность взаимодействия. Здесь применён фиксированный порог времени.</td></tr><tr><td><a href="https://snap.stanford.edu/class/cs224w-readings/brandes01centrality.pdf">Brandes, 2001</a></td><td>Взвешенное посредничество и счёт равных кратчайших путей.</td></tr><tr><td><a href="https://arxiv.org/abs/cond-mat/0008064">Albert, Jeong и Barabási, 2000</a></td><td>Эксперимент с удалением узлов и проверка изменения связности.</td></tr><tr><td><a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC1142352/">Guimerà и соавт., 2005</a></td><td>Роль городов в сети авиасообщений. Здесь рассматривается один снимок расписания и покрытие 180 городов.</td></tr></tbody></table><p class="sub"><a href="https://tochno.st/datasets/intercity_connectivity">«Если быть точным» (CC BY 4.0)</a> · <a href="https://rasp.yandex.ru/">Яндекс Расписания</a> · <a href="https://www.openstreetmap.org/copyright">OpenStreetMap (ODbL)</a></p><p><a href="https://github.com/AlexKeyyyy/transport-connectivity">Репозиторий Transport Connectivity</a></p>
+<footer><span></span><span>16</span></footer>
+</section>
+</html>

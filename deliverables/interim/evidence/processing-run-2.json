@@ -1,0 +1,94 @@
+{
+  "contract_version": "1.0-draft",
+  "snapshot_id": "tochno_intercity_v20260629",
+  "status": "success",
+  "input": {
+    "path": "data/raw/tochno_intercity_v20260629/data_intercity_connectivity_162_v20260629.csv",
+    "sha256": "aed8463339b988a7c9ac81aa976a4fc25c152e4066b551d25cbdcc16ebe16d53",
+    "size_bytes": 23511679,
+    "records": 96660,
+    "bom": false,
+    "header_matches_contract": true,
+    "manifest_matches": true
+  },
+  "output": {
+    "cities.csv": {
+      "rows": 180,
+      "sha256": "2c41900baaf94e26cc95df5f8bc19b70d6964066808cf9e514a93eeabf969e80"
+    },
+    "route_measurements.csv": {
+      "rows": 96660,
+      "sha256": "719f0d87035242548b72ee0764b9c7f4ddd35a077af708ecfec8bba04d2248e6"
+    },
+    "rejected_rows.csv": {
+      "rows": 0,
+      "sha256": "c5ba2b79d3a9d0631fa65e1e08849a65550f577050929ab135d58a91b6d71e49"
+    }
+  },
+  "balance": {
+    "rows_read": 96660,
+    "route_measurements": 96660,
+    "rejected_rows": 0
+  },
+  "rejections": {
+    "city_identity_missing": 0,
+    "unknown_transport_type": 0,
+    "self_pair": 0,
+    "missing_without_reason": 0,
+    "partial_measurement": 0,
+    "invalid_number": 0,
+    "exact_duplicate": 0,
+    "key_collision": 0
+  },
+  "missing_reason_values": {
+    "CD": 64430,
+    "Маршрут не найден": 32230
+  },
+  "measurements": {
+    "with_values": 64430,
+    "without_values": 32230,
+    "by_transport_type": {
+      "air": 32220,
+      "rail": 32220,
+      "road": 32220
+    }
+  },
+  "duplicates": {
+    "exact_duplicate": 0,
+    "key_collision": 0,
+    "source_differences": []
+  },
+  "identity": {
+    "endpoints": {
+      "total": 193320,
+      "sber_id_missing": 0,
+      "oktmo_missing": 0,
+      "identifiers_trimmed": 0
+    },
+    "cities": {
+      "total": 180,
+      "oktmo_missing": 0
+    },
+    "cities_by_namespace": {
+      "sber_territory": 180
+    },
+    "oktmo_conflicts": {
+      "sber_id_with_several_oktmo": [],
+      "oktmo_with_several_sber_id": []
+    },
+    "attribute_conflicts": [],
+    "invalid_attributes": []
+  },
+  "service": {
+    "started_at_utc": "2026-11-15T16:48:49+00:00",
+    "finished_at_utc": "2026-11-15T16:49:11+00:00",
+    "duration_sec": 21.846,
+    "peak_memory_bytes": 313070316,
+    "peak_memory_method": "tracemalloc: Python allocations from manifest to CSV bytes",
+    "code_version": "637e053360b8e6e74687b81295f631e7867a5925",
+    "parameters": {
+      "raw_dir": "data/raw/tochno_intercity_v20260629",
+      "output_dir": "data/normalized/tochno_intercity_v20260629"
+    }
+  }
+}
